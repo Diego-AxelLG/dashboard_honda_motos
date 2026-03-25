@@ -1,0 +1,13 @@
+# --- Core & Configuracion ---
+python-dotenv
+pydantic>=2.0
+pydantic-settings
+
+# --- Base de Datos (ORM & Drivers) ---
+sqlalchemy
+psycopg2-binary        # Driver PostgreSQL
+mysql-connector-python  # Driver MySQL
+
+# --- Data Pipeline (ETL & Manipulacion) ---
+pandas
+numpy

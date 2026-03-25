@@ -1,0 +1,125 @@
+/* ====================================================
+   CONFIGURACION DE MARCA — Cambiar estos valores para
+   adaptar el dashboard a un nuevo cliente.
+   ==================================================== */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* ── Brand palette (theme-independent) ─────────────── */
+:root {
+  --brand-primary: #3b82f6;
+  --brand-secondary: #1e40af;
+  --brand-accent: #60a5fa;
+}
+
+/* ── Light theme (default) ─────────────────────────── */
+:root {
+  --bg-main: #f8f9fb;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f1f3f7;
+  --bg-sidebar: #ffffff;
+  --bg-skeleton: #e2e5ea;
+  --border-color: #e2e5ea;
+  --text-primary: #1a1d27;
+  --text-secondary: #6b7280;
+  --text-muted: #6b7280;
+  --success: #16a34a;
+  --warning: #ca8a04;
+  --danger: #dc2626;
+
+  /* Charts */
+  --chart-grid: #e2e5ea;
+  --chart-axis: #6b7280;
+  --chart-tooltip-bg: #ffffff;
+  --chart-tooltip-border: #e2e5ea;
+  --chart-tooltip-text: #1a1d27;
+  --bar-chart-fill: #7fb8ca;
+
+  color-scheme: light;
+}
+
+/* ── Dark theme ────────────────────────────────────── */
+.dark {
+  --bg-main: #0f1117;
+  --bg-card: #1a1d23;
+  --bg-card-hover: #252840;
+  --bg-sidebar: #111318;
+  --bg-skeleton: #2a2d3e;
+  --border-color: #2d3139;
+  --text-primary: #f3f4f6;
+  --text-secondary: #9ca3af;
+  --text-muted: #7b8394;
+  --success: #22c55e;
+  --warning: #eab308;
+  --danger: #ef4444;
+
+  /* Charts */
+  --chart-grid: #2a2d3e;
+  --chart-axis: #868e96;
+  --chart-tooltip-bg: #1a1d27;
+  --chart-tooltip-border: #2a2d3e;
+  --chart-tooltip-text: #f1f3f5;
+  --bar-chart-fill: #67b7d1;
+
+  color-scheme: dark;
+}
+
+/* ── Base resets ───────────────────────────────────── */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-main);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+/* Safety net for Tremor/Recharts SVGs during HMR */
+svg {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* ── Utility classes ──────────────────────────────── */
+
+.transition-card {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.theme-transition,
+.theme-transition * {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

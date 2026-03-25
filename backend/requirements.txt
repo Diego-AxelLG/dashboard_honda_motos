@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+pydantic-settings
+httpx
+pandas
+numpy
+PyJWT[crypto]>=2.8.0
