@@ -9,11 +9,11 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-/* ── Brand palette (theme-independent) ─────────────── */
+/* ── Brand palette: Honda Motos ────────────────────── */
 :root {
-  --brand-primary: #3b82f6;
-  --brand-secondary: #1e40af;
-  --brand-accent: #60a5fa;
+  --brand-primary: #CC0000;
+  --brand-secondary: #333333;
+  --brand-accent: #E53935;
 }
 
 /* ── Light theme (default) ─────────────────────────── */

@@ -1,0 +1,1 @@
+SELECT trim(upper(aau_IdFk)) as vin, aau_fecha_llegada as arrival  FROM hmcrm.asigancion_auto where aau_fecha_llegada !='0000-00-00' and length(aau_IdFk) = 17 and aau_fecha_llegada >='2021-01-01'

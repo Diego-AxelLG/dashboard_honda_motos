@@ -91,9 +91,15 @@ class DatabaseConnector:
         elif self._db_type == 'metrics':
             return (f"mysql+mysqlconnector://{os.getenv('METRICS_USER')}:{os.getenv('METRICS_PASSWORD')}"
                     f"@{os.getenv('METRICS_HOST')}/{os.getenv('METRICS_DATABASE')}?charset=utf8mb4")
+        elif self._db_type == 'hmcrm':
+            return (f"mysql+mysqlconnector://{os.getenv('HMCRM_USER')}:{os.getenv('HMCRM_PASSWORD')}"
+                    f"@{os.getenv('HMCRM_HOST')}/{os.getenv('HMCRM_DATABASE')}?charset=utf8mb4")
+        elif self._db_type == 'sicofi':
+            return (f"mysql+mysqlconnector://{os.getenv('SICOFI_USER')}:{os.getenv('SICOFI_PASSWORD')}"
+                    f"@{os.getenv('SICOFI_HOST')}/{os.getenv('SICOFI_DATABASE')}?charset=utf8mb4")
         else:
             raise ValueError(f"Tipo de base de datos no soportado: '{self._db_type}'. "
-                             "Usar 'postgres', 'mysql' o 'metrics'.")
+                             "Usar 'postgres', 'mysql', 'metrics', 'hmcrm' o 'sicofi'.")
 
     def dispose(self):
         """Cierra todas las conexiones del pool."""
