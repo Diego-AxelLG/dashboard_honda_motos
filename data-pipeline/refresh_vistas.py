@@ -20,8 +20,9 @@ from sqlalchemy import text
 # TEMPLATE: Agregar aqui las vistas materializadas del proyecto
 # ---------------------------------------------------------------------------
 VIEWS = [
-    "dwh.mv_kpis_ventas_mensual",
-    # "dwh.mv_otra_vista",
+    "dwh.mv_kpis_mensual",
+    "dwh.mv_cumplimiento_ventas",
+    "dwh.mv_aging_inventario",
 ]
 
 # ---------------------------------------------------------------------------

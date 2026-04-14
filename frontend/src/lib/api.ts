@@ -48,10 +48,16 @@ export const getVentasFlujos = (p?: Params) =>
     api.get("/api/v1/ventas/flujos", { params: p }).then(r => r.data);
 export const getVentasDetalle = (p?: Params) =>
     api.get("/api/v1/ventas/detalle", { params: p }).then(r => r.data);
+export const getVentasCumplimientoPacing = (p?: Params) =>
+    api.get("/api/v1/ventas/cumplimiento-pacing", { params: p }).then(r => r.data);
 
 // Postventa
-export const getServicioKpis = (p?: Params) =>
-    api.get("/api/v1/postventa/servicio-kpis", { params: p }).then(r => r.data);
+export const getPostventaSummary = (p?: Params) =>
+    api.get("/api/v1/postventa/summary", { params: p }).then(r => r.data);
+export const getPostventaTrend = (p?: Params) =>
+    api.get("/api/v1/postventa/trend", { params: p }).then(r => r.data);
+export const getPostventaOtsTendencia = (p?: Params) =>
+    api.get("/api/v1/postventa/ots-tendencia", { params: p }).then(r => r.data);
 export const getOsAbiertas = (p?: { mui?: number }) =>
     api.get("/api/v1/postventa/os-abiertas", { params: p }).then(r => r.data);
 export const getOsAbiertasDetalle = (p?: { mui?: number }) =>
@@ -62,15 +68,29 @@ export const getUio = (p?: { mui?: number }) =>
     api.get("/api/v1/postventa/uio", { params: p }).then(r => r.data);
 
 // Financiero
-export const getEdr = (p?: Params) =>
-    api.get("/api/v1/financiero/edr", { params: p }).then(r => r.data);
-export const getDealerProfileFinanciero = (p?: Params) =>
-    api.get("/api/v1/financiero/dealer-profile", { params: p }).then(r => r.data);
-export const getVentasKpisDP = (p?: Params) =>
-    api.get("/api/v1/financiero/ventas-kpis", { params: p }).then(r => r.data);
+export const getFinancials = (p?: Params) =>
+    api.get("/api/v1/financiero/financials", { params: p }).then(r => r.data);
 
 // Inventario
 export const getInventarioAging = (p?: { mui?: number }) =>
     api.get("/api/v1/inventario/aging", { params: p }).then(r => r.data);
+export const getInventarioResumenStock = (p?: { mui?: number }) =>
+    api.get("/api/v1/inventario/resumen-stock", { params: p }).then(r => r.data);
 export const getInventarioDetalle = (p?: { mui?: number }) =>
     api.get("/api/v1/inventario/detalle", { params: p }).then(r => r.data);
+export const getInventarioApartados = (p?: { mui?: number }) =>
+    api.get("/api/v1/inventario/apartados", { params: p }).then(r => r.data);
+
+// Cinco Alas
+export const getCincoAlasCatalogo = () =>
+    api.get("/api/v1/cinco-alas/catalogo").then(r => r.data);
+export const getCincoAlasEvaluaciones = () =>
+    api.get("/api/v1/cinco-alas/evaluaciones").then(r => r.data);
+export const getCincoAlasEvaluacion = (anio: number, trimestre: number) =>
+    api.get("/api/v1/cinco-alas/evaluacion", { params: { anio, trimestre } }).then(r => r.data);
+export const postCincoAlasEvaluacion = (payload: unknown) =>
+    api.post("/api/v1/cinco-alas/evaluacion", payload).then(r => r.data);
+export const getCincoAlasPrecalculo = (anio: number, trimestre: number) =>
+    api.get("/api/v1/cinco-alas/precalculo", { params: { anio, trimestre } }).then(r => r.data);
+export const getCincoAlasResumenActual = () =>
+    api.get("/api/v1/cinco-alas/resumen-actual").then(r => r.data);

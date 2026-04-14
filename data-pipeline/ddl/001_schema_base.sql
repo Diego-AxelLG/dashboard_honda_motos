@@ -165,14 +165,6 @@ SELECT
         WHEN COALESCE(p.meta, 0) = 0 THEN NULL
         ELSE ROUND(v.total_ventas * 100.0 / p.meta, 1)
     END AS pct_cumplimiento,
-    -- Variación mes anterior (MoM)
-    CASE
-        WHEN LAG(v.total_ventas, 1) OVER w = 0 THEN NULL
-        ELSE ROUND(
-            (v.total_ventas - LAG(v.total_ventas, 1) OVER w) * 100.0
-            / LAG(v.total_ventas, 1) OVER w, 1
-        )
-    END AS var_pct_mom,
     -- Variación año anterior (YoY) — JOIN explícito para evitar huecos
     CASE
         WHEN COALESCE(v_ant.total_ventas, 0) = 0 THEN NULL
@@ -190,7 +182,6 @@ LEFT JOIN ventas_agg v_ant
     AND v_ant.anio_mes = TO_CHAR(
         TO_DATE(v.anio_mes, 'YYYY-MM') - INTERVAL '1 year', 'YYYY-MM'
     )
-WINDOW w AS (PARTITION BY v.id_sucursal ORDER BY v.anio_mes)
 WITH NO DATA;
 
 -- Índice único requerido para REFRESH CONCURRENTLY

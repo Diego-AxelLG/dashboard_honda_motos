@@ -107,14 +107,14 @@ def cargar_ventas(hmcrm_engine, pg_engine, fecha_inicio: str) -> int:
 
     # -- TRANSFORM --
     # Deduplicar por VIN (cada VIN se vende una sola vez; si hay duplicados,
-    # conservar el registro mas reciente)
+    # conservar el registro mas reciente — la venta cancelada no cuenta)
     antes = len(df)
     df.sort_values("fecha", ascending=False, inplace=True)
     df.drop_duplicates(subset=["vin"], keep="first", inplace=True)
     if len(df) < antes:
         logger.info(f"   Dedup: {antes - len(df)} duplicados por VIN removidos")
 
-    # Crear id_oportunidad = VIN (cada VIN se vende una sola vez)
+    # Crear id_oportunidad = VIN
     df["id_oportunidad"] = df["vin"]
 
     # Mapear columnas al schema destino

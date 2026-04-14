@@ -6,9 +6,19 @@ from backend.app.services import postventa_service
 router = APIRouter()
 
 
-@router.get("/servicio-kpis")
-def servicio_kpis(mui: int | None = None, anio_mes: str | None = None, db: Session = Depends(get_db)):
-    return postventa_service.get_servicio_kpis(db, mui, anio_mes)
+@router.get("/summary")
+def summary(mui: int | None = None, anio_mes: str | None = None, db: Session = Depends(get_db)):
+    return postventa_service.get_summary(db, mui, anio_mes)
+
+
+@router.get("/trend")
+def trend(mui: int | None = None, anio_mes: str | None = None, db: Session = Depends(get_db)):
+    return postventa_service.get_trend(db, mui, anio_mes)
+
+
+@router.get("/ots-tendencia")
+def ots_tendencia(mui: int | None = None, anio_mes: str | None = None, db: Session = Depends(get_db)):
+    return postventa_service.get_ots_tendencia(db, mui, anio_mes)
 
 
 @router.get("/os-abiertas")

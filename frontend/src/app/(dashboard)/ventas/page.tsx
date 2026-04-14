@@ -4,81 +4,45 @@ import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
     LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
-    Tooltip, Legend, ResponsiveContainer, ComposedChart, Area,
+    Tooltip, Legend, ResponsiveContainer, ComposedChart, LabelList,
 } from "recharts";
 import {
     getVentasResumen, getVentasTendencia, getVentasPorModelo,
-    getVentasFlujos, getVentasDetalle, getVentasKpisDP,
+    getVentasFlujos, getVentasDetalle, getVentasCumplimientoPacing,
 } from "@/lib/api";
 import { AGENCIES } from "@/lib/constants";
-import { fmtCurrency, fmtNumber, fmtPct, fmtDate } from "@/lib/utils";
-import { KPICard, LoadingState, AgencyPills, MonthPicker } from "@/components/ui";
+import { fmtNumber, fmtDate } from "@/lib/utils";
+import { LoadingState, AgencyPills, MonthPicker } from "@/components/ui";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface Tendencia { fecha: string; ventas_acumuladas: number; plan_prorrateado: number }
+interface Tendencia {
+    fecha: string;
+    ventas_acumuladas: number;
+    plan_prorrateado: number;
+    ventas_mes_anterior: number;
+    ventas_anio_anterior: number;
+}
 interface Modelo { modelo: string; unidades: number; contado: number; financiamiento: number }
 interface Flujo { fecha: string; id_sucursal: number; freshup: number; internet: number; total: number }
 interface VentaDetalle { fecha: string; id_sucursal: number; sucursal: string; modelo: string; vin: string; venta_contado: boolean }
-interface Resumen { anio_mes: string; id_sucursal: number; sucursal: string; total_ventas: number; ventas_nuevos: number; monto_total: number; meta: number; pct_cumplimiento: number; var_pct_mom: number; var_pct_yoy: number }
-interface DPRow { id_sucursal: number; dealer_profile_id: number; nombre: string; valor: number | null; sub_valor: number | null }
-
-// ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
-
-const MOCK_TENDENCIA: Tendencia[] = Array.from({ length: 20 }, (_, i) => ({
-    fecha: `2026-03-${String(i + 1).padStart(2, "0")}`,
-    ventas_acumuladas: Math.round((i + 1) * 3.8),
-    plan_prorrateado: Math.round((i + 1) * 3.1),
-}));
-
-const MOCK_MODELOS: Modelo[] = [
-    { modelo: "CB 125R", unidades: 25, contado: 18, financiamiento: 7 },
-    { modelo: "CB 190R", unidades: 18, contado: 12, financiamiento: 6 },
-    { modelo: "XR 150L", unidades: 15, contado: 10, financiamiento: 5 },
-    { modelo: "CGL 125", unidades: 12, contado: 9, financiamiento: 3 },
-    { modelo: "NX 125", unidades: 8, contado: 5, financiamiento: 3 },
-];
-
-const MOCK_FLUJOS: Flujo[] = Array.from({ length: 15 }, (_, i) => ({
-    fecha: `2026-03-${String(i + 1).padStart(2, "0")}`,
-    id_sucursal: 6,
-    freshup: Math.round(Math.random() * 8 + 2),
-    internet: Math.round(Math.random() * 5 + 1),
-    total: 0,
-})).map(f => ({ ...f, total: f.freshup + f.internet }));
-
-const MOCK_DETALLE: VentaDetalle[] = [
-    { fecha: "2026-03-22", id_sucursal: 6, sucursal: "Honda Motos Tijuana", modelo: "CB 125R", vin: "LHJCJ1234M0001", venta_contado: true },
-    { fecha: "2026-03-21", id_sucursal: 8, sucursal: "Honda Motos Mexicali", modelo: "XR 150L", vin: "LHJCJ5678M0002", venta_contado: false },
-];
-
-const MOCK_RESUMEN: Resumen[] = [
-    { anio_mes: "2026-03", id_sucursal: 6, sucursal: "Honda Motos Tijuana", total_ventas: 45, ventas_nuevos: 42, monto_total: 12_400_000, meta: 50, pct_cumplimiento: 84, var_pct_mom: 5.2, var_pct_yoy: -2.1 },
-    { anio_mes: "2026-03", id_sucursal: 8, sucursal: "Honda Motos Mexicali", total_ventas: 38, ventas_nuevos: 35, monto_total: 8_900_000, meta: 45, pct_cumplimiento: 78, var_pct_mom: -3.8, var_pct_yoy: 1.5 },
-];
-
-const MOCK_DP: DPRow[] = [
-    { id_sucursal: 6, dealer_profile_id: 1, nombre: "Ventas $", valor: 12_400_000, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 2, nombre: "Ventas #", valor: 42, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 3, nombre: "Utilidad bruta", valor: 2_100_000, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 4, nombre: "Precio promedio", valor: 295_000, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 5, nombre: "Margen promedio", valor: 16.9, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 6, nombre: "Dias venta prom", valor: 28, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 7, nombre: "Inventario disp", valor: 65, sub_valor: null },
-];
-
+interface Resumen { anio_mes: string; id_sucursal: number; sucursal: string; total_ventas: number; ventas_nuevos: number; monto_total: number; meta: number; pct_cumplimiento: number; var_pct_yoy: number }
+interface PacingRow {
+    ventas_actual: number;
+    plan_total: number;
+    plan_prorrateado: number;
+    cumplimiento_vs_plan_pct: number | null;
+    ventas_mes_anterior: number;
+    var_vs_mes_anterior_pct: number | null;
+    ventas_anio_anterior: number;
+    var_vs_anio_anterior_pct: number | null;
+}
+interface PacingResponse { anio_mes: string; cutoff_day: number; dias_mes: number; total: PacingRow; sucursales: (PacingRow & { mui: number; sucursal: string })[] }
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function dpVal(rows: DPRow[], dpId: number): number | null {
-    const match = rows.find(r => r.dealer_profile_id === dpId);
-    return match?.valor ?? null;
-}
 
 function getCurrentMonth(): string {
     return new Date().toISOString().slice(0, 7);
@@ -94,42 +58,47 @@ export default function VentasPage() {
     const [mes, setMes] = useState(getCurrentMonth());
     const [mui, setMui] = useState<number | null>(null);
     const [loading, setLoading] = useState(true);
+    const [fetchError, setFetchError] = useState(false);
     const [tab, setTab] = useState<"ventas" | "flujos">("ventas");
     const [page, setPage] = useState(0);
 
     const [resumen, setResumen] = useState<Resumen[]>([]);
-    const [dpKpis, setDpKpis] = useState<DPRow[]>([]);
     const [tendencia, setTendencia] = useState<Tendencia[]>([]);
     const [modelos, setModelos] = useState<Modelo[]>([]);
     const [flujos, setFlujos] = useState<Flujo[]>([]);
     const [detalle, setDetalle] = useState<VentaDetalle[]>([]);
+    const [pacing, setPacing] = useState<PacingResponse | null>(null);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
+        setFetchError(false);
         setPage(0);
         const params = { anio_mes: mes, ...(mui ? { mui } : {}) };
         try {
-            const [res, dp, tend, mod, flu, det] = await Promise.all([
+            const [res, tend, mod, flu, det, pac] = await Promise.all([
                 getVentasResumen(params).catch(() => null),
-                getVentasKpisDP(params).catch(() => null),
                 getVentasTendencia(params).catch(() => null),
                 getVentasPorModelo(params).catch(() => null),
                 getVentasFlujos(params).catch(() => null),
                 getVentasDetalle(params).catch(() => null),
+                getVentasCumplimientoPacing(params).catch(() => null),
             ]);
-            setResumen(res?.length ? res : MOCK_RESUMEN);
-            setDpKpis(dp?.length ? dp : MOCK_DP);
-            setTendencia(tend?.length ? tend : MOCK_TENDENCIA);
-            setModelos(mod?.length ? mod : MOCK_MODELOS);
-            setFlujos(flu?.length ? flu : MOCK_FLUJOS);
-            setDetalle(det?.length ? det : MOCK_DETALLE);
+            const anyFailed = !res && !tend && !mod && !flu && !det && !pac;
+            if (anyFailed) setFetchError(true);
+            setResumen(res ?? []);
+            setTendencia(tend ?? []);
+            setModelos(mod ?? []);
+            setFlujos(flu ?? []);
+            setDetalle(det ?? []);
+            setPacing(pac ?? null);
         } catch {
-            setResumen(MOCK_RESUMEN);
-            setDpKpis(MOCK_DP);
-            setTendencia(MOCK_TENDENCIA);
-            setModelos(MOCK_MODELOS);
-            setFlujos(MOCK_FLUJOS);
-            setDetalle(MOCK_DETALLE);
+            setFetchError(true);
+            setResumen([]);
+            setTendencia([]);
+            setModelos([]);
+            setFlujos([]);
+            setDetalle([]);
+            setPacing(null);
         } finally {
             setLoading(false);
         }
@@ -139,13 +108,27 @@ export default function VentasPage() {
 
     // Derived
     const filtered = mui ? resumen.filter(r => r.id_sucursal === mui) : resumen;
-    const totalVentas = filtered.reduce((s, r) => s + r.total_ventas, 0);
     const totalMeta = filtered.reduce((s, r) => s + r.meta, 0);
-    const cumpl = totalMeta > 0 ? (totalVentas / totalMeta) * 100 : 0;
-    const avgMom = filtered.length ? filtered.reduce((s, r) => s + r.var_pct_mom, 0) / filtered.length : 0;
+
+    // KPIs del mes (prefiere pacing; fallback a resumen)
+    const p = pacing?.total;
+    const ventasActual = p?.ventas_actual ?? filtered.reduce((s, r) => s + r.total_ventas, 0);
+    const meta = p?.plan_total ?? totalMeta;
+    const cumplDiario = p?.cumplimiento_vs_plan_pct ?? null;
+    const cumplMensual = meta > 0 ? (ventasActual / meta) * 100 : null;
+    const varMoM = p?.var_vs_mes_anterior_pct ?? null;
+    const varYoY = p?.var_vs_anio_anterior_pct ?? null;
 
     const pagedDetalle = detalle.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
     const totalPages = Math.ceil(detalle.length / PAGE_SIZE);
+
+    const fmtSigned = (v: number | null) => v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
+    const colorPct = (v: number | null, goodPositive = true) => {
+        if (v == null) return "text-[var(--text-muted)]";
+        const good = goodPositive ? v >= 0 : v < 0;
+        return good ? "text-[var(--success)]" : "text-[var(--danger)]";
+    };
+    const cumplOk = (cumplMensual ?? 0) >= 100;
 
     if (loading) {
         return (
@@ -162,7 +145,7 @@ export default function VentasPage() {
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h1 className="text-lg font-bold text-[var(--text-primary)]">Ventas</h1>
-                    <p className="mt-1 text-sm text-[var(--text-secondary)]">Tendencia, modelos y detalle</p>
+                    <p className="mt-1 text-sm text-[var(--text-secondary)]">Evoluci&oacute;n diaria, ventas por modelo y KPIs del mes</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                     <MonthPicker value={mes} onChange={setMes} min="2024-01" />
@@ -170,16 +153,90 @@ export default function VentasPage() {
                 </div>
             </div>
 
-            {/* KPI Row */}
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-8">
-                <KPICard title="Ventas #" value={totalVentas} format="number" delta={avgMom} deltaLabel="MoM" />
-                <KPICard title="Cumplimiento" value={cumpl} format="percent" subtitle={`meta: ${totalMeta}`} />
-                <KPICard title="Ventas $" value={dpVal(dpKpis, 1)} format="currency" />
-                <KPICard title="Utilidad Bruta" value={dpVal(dpKpis, 3)} format="currency" />
-                <KPICard title="Precio Prom." value={dpVal(dpKpis, 4)} format="currency" />
-                <KPICard title="Margen Prom." value={dpVal(dpKpis, 5)} format="percent" />
-                <KPICard title="D\u00edas Venta" value={dpVal(dpKpis, 6)} format="number" />
-                <KPICard title="Inv. Disponible" value={dpVal(dpKpis, 7)} format="number" />
+            {fetchError && (
+                <div className="rounded-lg border border-[var(--danger)]/30 bg-[var(--danger)]/5 px-4 py-3 text-sm text-[var(--danger)]">
+                    No se pudieron cargar datos del servidor. Verifica que el backend est&eacute; corriendo en el puerto 8001.
+                </div>
+            )}
+
+            {/* Tendencia full width */}
+            <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-5">
+                <div className="mb-4 flex items-start justify-between gap-4">
+                    <div>
+                        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Evoluci&oacute;n Diaria de Ventas</h3>
+                        <p className="mt-0.5 text-xs text-[var(--text-muted)]">Acumulado del mes actual vs plan vs mes anterior vs a&ntilde;o pasado</p>
+                    </div>
+                    {cumplMensual != null && (
+                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${cumplOk ? "bg-[var(--success)]/10 text-[var(--success)]" : "bg-[var(--danger)]/10 text-[var(--danger)]"}`}>
+                            {cumplMensual.toFixed(1)}% vs Plan Mensual
+                        </span>
+                    )}
+                </div>
+                <ResponsiveContainer width="100%" height={350}>
+                    <LineChart data={tendencia}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                        <XAxis dataKey="fecha" tickFormatter={(v: string) => v.slice(8)} tick={{ fontSize: 11 }} stroke="var(--text-muted)" />
+                        <YAxis tick={{ fontSize: 11 }} stroke="var(--text-muted)" />
+                        <Tooltip
+                            contentStyle={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border-color)", borderRadius: 8 }}
+                            labelFormatter={(v: string) => fmtDate(v)}
+                        />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        <Line type="monotone" dataKey="ventas_anio_anterior" name="Año pasado" stroke="var(--text-muted)" strokeOpacity={0.5} strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
+                        <Line type="monotone" dataKey="ventas_mes_anterior" name="Mes anterior" stroke="var(--text-muted)" strokeWidth={1.5} dot={false} />
+                        <Line type="monotone" dataKey="plan_prorrateado" name="Plan" stroke="var(--danger)" strokeWidth={2} strokeDasharray="8 4" dot={false} />
+                        <Line type="monotone" dataKey="ventas_acumuladas" name="Mes actual" stroke="var(--brand-primary)" strokeWidth={2.5} dot={false} />
+                    </LineChart>
+                </ResponsiveContainer>
+            </div>
+
+            {/* Modelo + KPIs row */}
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                {/* Por modelo */}
+                <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-5">
+                    <h3 className="text-sm font-semibold text-[var(--text-primary)]">Ventas por Modelo</h3>
+                    <p className="mt-0.5 mb-4 text-xs text-[var(--text-muted)]">Mix completo &mdash; mes actual</p>
+                    <ResponsiveContainer width="100%" height={320}>
+                        <BarChart data={modelos} layout="vertical" margin={{ right: 32 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                            <XAxis type="number" tick={{ fontSize: 11 }} stroke="var(--text-muted)" />
+                            <YAxis dataKey="modelo" type="category" width={80} tick={{ fontSize: 11 }} stroke="var(--text-muted)" />
+                            <Tooltip contentStyle={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border-color)", borderRadius: 8 }} />
+                            <Bar dataKey="unidades" name="Unidades" fill="var(--brand-primary)" radius={[0, 4, 4, 0]}>
+                                <LabelList dataKey="unidades" position="right" style={{ fontSize: 11, fill: "var(--text-primary)", fontWeight: 600 }} />
+                            </Bar>
+                        </BarChart>
+                    </ResponsiveContainer>
+                </div>
+
+                {/* KPIs del mes */}
+                <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-5">
+                    <h3 className="text-sm font-semibold text-[var(--text-primary)]">KPIs del Mes</h3>
+                    <p className="mt-0.5 mb-4 text-xs text-[var(--text-muted)]">Resumen al d&iacute;a de hoy</p>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-lg border border-[var(--border-color)] p-4">
+                            <div className="text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">Unidades Vendidas</div>
+                            <div className="mt-2 flex items-baseline gap-1">
+                                <span className="text-2xl font-bold text-[var(--text-primary)]">{fmtNumber(ventasActual)}</span>
+                                <span className="text-sm text-[var(--text-muted)]">/ {fmtNumber(meta)}</span>
+                            </div>
+                        </div>
+                        <div className="rounded-lg border border-[var(--border-color)] p-4">
+                            <div className="text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">% Cumpl. vs Plan Diario</div>
+                            <div className={`mt-2 text-2xl font-bold ${cumplDiario == null ? "text-[var(--text-muted)]" : cumplDiario >= 100 ? "text-[var(--success)]" : "text-[var(--danger)]"}`}>
+                                {cumplDiario == null ? "—" : `${cumplDiario.toFixed(1)}%`}
+                            </div>
+                        </div>
+                        <div className="rounded-lg border border-[var(--border-color)] p-4">
+                            <div className="text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">Var. MoM</div>
+                            <div className={`mt-2 text-2xl font-bold ${colorPct(varMoM)}`}>{fmtSigned(varMoM)}</div>
+                        </div>
+                        <div className="rounded-lg border border-[var(--border-color)] p-4">
+                            <div className="text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">Var. YoY</div>
+                            <div className={`mt-2 text-2xl font-bold ${colorPct(varYoY)}`}>{fmtSigned(varYoY)}</div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             {/* Tabs */}
@@ -194,41 +251,6 @@ export default function VentasPage() {
 
             {tab === "ventas" ? (
                 <>
-                    {/* Charts row */}
-                    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                        {/* Tendencia acumulada */}
-                        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-5">
-                            <h3 className="mb-4 text-sm font-semibold text-[var(--text-primary)]">Venta Acumulada vs Plan</h3>
-                            <ResponsiveContainer width="100%" height={280}>
-                                <LineChart data={tendencia}>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
-                                    <XAxis dataKey="fecha" tickFormatter={(v: string) => v.slice(8)} tick={{ fontSize: 11 }} stroke="var(--text-muted)" />
-                                    <YAxis tick={{ fontSize: 11 }} stroke="var(--text-muted)" />
-                                    <Tooltip contentStyle={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border-color)", borderRadius: 8 }} />
-                                    <Legend />
-                                    <Line type="monotone" dataKey="ventas_acumuladas" name="Ventas" stroke="var(--brand-primary)" strokeWidth={2} dot={false} />
-                                    <Line type="monotone" dataKey="plan_prorrateado" name="Plan" stroke="var(--text-muted)" strokeWidth={2} strokeDasharray="5 5" dot={false} />
-                                </LineChart>
-                            </ResponsiveContainer>
-                        </div>
-
-                        {/* Por modelo */}
-                        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-5">
-                            <h3 className="mb-4 text-sm font-semibold text-[var(--text-primary)]">Ventas por Modelo</h3>
-                            <ResponsiveContainer width="100%" height={280}>
-                                <BarChart data={modelos} layout="vertical">
-                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
-                                    <XAxis type="number" tick={{ fontSize: 11 }} stroke="var(--text-muted)" />
-                                    <YAxis dataKey="modelo" type="category" width={80} tick={{ fontSize: 11 }} stroke="var(--text-muted)" />
-                                    <Tooltip contentStyle={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border-color)", borderRadius: 8 }} />
-                                    <Legend />
-                                    <Bar dataKey="contado" name="Contado" stackId="a" fill="var(--brand-primary)" radius={[0, 0, 0, 0]} />
-                                    <Bar dataKey="financiamiento" name="Financiamiento" stackId="a" fill="var(--brand-accent)" radius={[0, 4, 4, 0]} />
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-
                     {/* Detalle table */}
                     <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-5">
                         <div className="mb-4 flex items-center justify-between">

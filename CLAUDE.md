@@ -1,236 +1,197 @@
-# CLAUDE.md — Honda Motos Dashboard
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Proyecto
 
 Dashboard de BI para **Honda Motos** — dos sucursales: **Tijuana (mui 6)** y **Mexicali (mui 8)**.
-Ensenada (mui 7) está cerrada y excluida de todo.
+Ensenada (mui 7) esta cerrada y excluida de todo.
 
-Construido sobre un boilerplate genérico de BI (ver README.md para stack completo).
+Stack: Next.js 14 + FastAPI + PostgreSQL DWH (Kimball) + Python ETL desde 3 MySQL sources.
 
-## Stack
+## IMPORTANTE
 
-- **Frontend**: Next.js 14, React 18, TypeScript, TailwindCSS, Tremor v3, Recharts
-- **Backend**: FastAPI, Pydantic v2, SQLAlchemy
-- **Data Pipeline**: Python, pandas, SQLAlchemy
-- **Bases de datos origen**: MySQL (3 schemas en el mismo host)
-- **DWH destino**: PostgreSQL 15, esquema Kimball (star schema)
+**NUNCA usar el puerto 8000.** En ese puerto corre otro dashboard. Usar un puerto diferente para el backend (ej. `--port 8001`).
+
+## Comandos
+
+```bash
+# --- Frontend ---
+cd frontend && npm install && npm run dev    # Dev en :3000, proxy a :8001
+npm run build                                 # Build produccion (static export)
+npm run lint                                  # ESLint
+
+# --- Backend (ejecutar desde raiz del proyecto) ---
+source venv/bin/activate
+uvicorn backend.app.main:app --reload --port 8001  # Dev en :8001, docs en /docs
+# Health check: curl http://localhost:8001/api/v1/health
+
+# --- ETL (ejecutar desde raiz del proyecto) ---
+source venv/bin/activate
+PYTHONPATH=data-pipeline python data-pipeline/etl/scripts/etl_ventas.py --full
+PYTHONPATH=data-pipeline python data-pipeline/etl/scripts/etl_plan_ventas.py
+PYTHONPATH=data-pipeline python data-pipeline/etl/scripts/etl_postventa_financiero.py --full
+# ... demas scripts en data-pipeline/etl/scripts/
+
+# Refresh vistas materializadas
+PYTHONPATH=data-pipeline python data-pipeline/refresh_vistas.py
+
+# Orquestacion cron (con flock para evitar concurrencia)
+./data-pipeline/cron_etl.sh main        # Ventas, plan, flujos, inventario
+./data-pipeline/cron_etl.sh secondary   # Postventa+financiero, OS, refacciones, UIO
+
+# Cron activo: cada 2hrs al :15/:20, ventana 6am-8pm
+
+# --- DDL (orden importa) ---
+# Se ejecuta via Python (psql no tiene acceso directo):
+# source venv/bin/activate && PYTHONPATH=data-pipeline python -c "..."
+# DDLs: 001_schema_base.sql → 002_honda_motos.sql → 003_honda_motos_all_facts.sql → 004_refactor_financiero_postventa.sql
+```
+
+## Arquitectura
+
+```
+backend/app/
+  main.py              # FastAPI + middlewares (CORS, rate limit 60/s, audit log, security headers)
+  core/config.py       # pydantic-settings lee PG_*, CORS_ORIGINS, ENVIRONMENT de .env
+  core/database.py     # SQLAlchemy engine + SessionLocal + get_db() dependency
+  api/router.py        # Monta sub-routers en /api/v1/{modulo}
+  api/endpoints/       # Handlers: ventas, postventa, financiero, inventario, auth, health
+  services/            # financiero_service, postventa_service, ventas_service, inventario_service
+
+frontend/src/
+  app/(dashboard)/     # Pages: /, /ventas, /postventa, /inventario, /financiero
+  app/login/           # Login con ParticleField animado
+  components/ui/       # KPICard, DataGrid<T>, AgencyPills, MonthPicker, LoadingState
+  components/layout/   # LayoutShell (sidebar+header), Sidebar, Header, ThemeToggle
+  lib/api.ts           # Axios client con retry 3x en 5xx; funciones tipadas por endpoint
+  lib/constants.ts     # CLIENT_NAME, CLIENT_TAGLINE, AGENCIES (para white-label)
+  lib/utils.ts         # Formatters: fmtCurrency, fmtNumber, fmtPct, fmtDate (es-MX)
+
+data-pipeline/
+  etl/utils.py         # DatabaseConnector (singleton), read_sql_file, inject_params
+  etl/extract/ventas/  # SQL: extract_ventas, extract_plan_ventas, extract_flujos_piso, extract_llegadavin_inventario
+  etl/extract/postventa/  # SQL: extract_estado_resultados, extract_ppto_estado_resultados,
+                          #      extract_contable_servicio, extract_venta_mo, extract_kpis_postventa,
+                          #      extract_os_abierta, extract_os_abierta_detalle, extract_inv_refacciones, extract_UIO
+  etl/scripts/         # ETL scripts: etl_ventas, etl_plan_ventas, etl_flujos_piso, etl_inventario,
+                       #   etl_postventa_financiero (orquestador unificado), etl_os_abierta,
+                       #   etl_inv_refacciones, etl_uio
+  ddl/                 # 4 archivos DDL (ejecutar en orden numerico)
+  scripts/             # EDA, exploracion, audit_integridad.py
+  cron_etl.sh          # Orquestador con flock
+  refresh_vistas.py    # Refresh de 3 MVs
+```
+
+## Patrones criticos de desarrollo
+
+### Backend — SQL en servicios
+- Usar `CAST(:param AS type)` en SQL, **nunca** `:param::type` (SQLAlchemy escapa `::`)
+- Queries complejos van como raw SQL con `text()`, no ORM
+- Dependency injection: `db: Session = Depends(get_db)`
+
+### ETL — Dos patrones de carga
+- **UPSERT** (datos transaccionales): `ON CONFLICT DO UPDATE` — usado en ventas, plan, KPIs, presupuestos, contable
+- **DELETE+INSERT** (snapshots): borrar fecha_snapshot del dia + insertar — usado en inventario, OS abiertas
+- CLI args: `--full` (historico completo), `--dias N` (ventana deslizante, default 90)
+- Ventas: dedup por VIN (una moto cancelada y re-vendida cuenta como 1 venta, la mas reciente)
+
+### Frontend — Patron de pagina
+- `"use client"` + useState para mes/mui/loading/data + fetchError
+- useEffect fetch cuando cambian filtros (anio_mes, mui)
+- AgencyPills + MonthPicker arriba, KPICards + DataGrid abajo
+- LoadingState con skeletons mientras carga
+- Banner de error rojo cuando API falla (sin datos mock)
+- next.config.js hace proxy `/api/*` → `:8001` en dev
 
 ## Bases de datos origen
 
-Todas en el mismo host (108.175.209.183). Credenciales en `.env`.
+Todas en el mismo host. Credenciales en `.env` con prefijos.
+**NOTA**: passwords contienen `*)`, no usar `source .env` en bash (python-dotenv los carga).
 
-| Variable prefix | Schema   | Contenido                                          |
-|-----------------|----------|-----------------------------------------------------|
-| `METRICS_`      | metrics  | Ventas, inventario, servicio, dealer profile, OS    |
-| `SICOFI_`       | sicofi   | Contabilidad: balanza, presupuestos, catálogos      |
-| `HMCRM_`        | hmcrm    | CRM Honda Motos: contactos, ventas, plan, inventario|
+| Prefijo     | Schema   | Contenido                                           |
+|-------------|----------|-----------------------------------------------------|
+| `METRICS_`  | metrics  | Servicio, OS, refacciones, UIO                      |
+| `SICOFI_`   | sicofi   | Contabilidad: balanza, presupuestos, catalogos      |
+| `HMCRM_`    | hmcrm    | CRM: contactos, ventas, plan, inventario            |
 
-## Identificadores de sucursal
+Conectores en `etl/utils.py`: `postgres`, `mysql`, `metrics`, `hmcrm`, `sicofi`
 
-### metrics / dealer_profile (marca_unidad_id)
-- `6` = Honda Motos Tijuana
-- `8` = Honda Motos Mexicali
-- `7` = Honda Motos Ensenada (CERRADA — no usar)
+## Identificadores de sucursal (MUI = marca_unidad_id)
 
-### sicofi (marca + terminacion)
-- `HONDA MOTOS` + terminacion `1` = Tijuana (mui 6)
-- `HONDA MOTOS` + terminacion `2` = Mexicali (mui 8)
-- `HONDA MOTOS` + terminacion `3` = Ensenada (no usar)
-- Nota: `sicofi.balanza` NO tiene datos para HONDA MOTOS. Solo `balanza_ppto` los tiene.
+| Sistema | Tijuana (mui 6) | Mexicali (mui 8) | Ensenada (NO USAR) |
+|---------|-----------------|-------------------|---------------------|
+| metrics | `marca_unidad_id = 6` | `marca_unidad_id = 8` | `7` (cerrada) |
+| sicofi balanza_ppto | `HONDA MOTOS` term `1` | term `2` | term `3` |
+| sicofi balanza (reales) | cb=`HONDA MOTOS` b=`HONDA` term `4` | term `6` | term `5` |
+| hmcrm | `hus_ciudad='Tijuana'` / `plv_id_agencia=1` | `hus_ciudad='Mexicali'` / `plv_id_agencia=2` | — |
+| servicio_ventas (prefijo factura) | `SMT` | `SMM` | — |
 
-### hmcrm
-- `hus_ciudad = 'Tijuana'` o `plv_id_agencia = 1` = mui 6
-- `hus_ciudad = 'Mexicali'` o `plv_id_agencia = 2` = mui 8
-- **Tecate** aparece en vw_ventas_totales (191 registros) — excluido en extract_ventas.sql
+## DWH PostgreSQL — Schema `dwh` (Kimball)
 
-### Prefijos de factura en servicio_ventas
-- `SMT` = Tijuana (6)
-- `SMM` = Mexicali (8)
-
-## DWH PostgreSQL (honda_motos)
-
-Schema `dwh` con modelo Kimball. DDLs en `data-pipeline/ddl/`:
-- `001_schema_base.sql` — dims + fact_ventas/inventario/plan + mv_kpis_mensual
-- `002_honda_motos.sql` — seeds sucursales, venta_contado, modelo en plan, etl_last_run
-- `003_honda_motos_all_facts.sql` — todas las tablas de postventa + financiero + MVs
+DDLs en `data-pipeline/ddl/` (ejecutar en orden 001 → 002 → 003 → 004).
 
 ### Tablas de hechos
 
-| Tabla | Filas | Patron | Fuente |
-|-------|-------|--------|--------|
-| `fact_ventas` | 2,744 | UPSERT (id_oportunidad=VIN) | hmcrm |
-| `fact_plan` | 48 | UPSERT (anio_mes, id_sucursal, modelo) | hmcrm |
-| `fact_flujos_piso` | 753 | UPSERT (fecha, id_sucursal) | hmcrm |
-| `fact_inventario` | 2,579 | DELETE+INSERT (fecha_snapshot) | hmcrm |
-| `fact_servicio_kpi` | 1,189 | UPSERT (fecha, id_sucursal) | metrics |
-| `fact_os_abierta` | 5 | DELETE+INSERT (fecha_snapshot) | metrics |
-| `fact_os_abierta_detalle` | 35 | DELETE+INSERT (fecha_snapshot) | metrics |
-| `fact_inv_refacciones` | 2 | UPSERT (fecha_snapshot, id_sucursal) | metrics |
-| `fact_uio` | 2 | UPSERT (fecha_snapshot, id_sucursal) | metrics |
-| `fact_dealer_profile` | 161 | UPSERT (fecha, id_sucursal, dp_id) | metrics |
-| `fact_ppto_servicio` | 48 | UPSERT (fecha, id_sucursal, tipo) | sicofi |
-| `fact_ppto_edr` | 817 | UPSERT (fecha, suc, seccion, rama, tipo) | sicofi |
+| Tabla | Patron | Fuente | Conflict keys |
+|-------|--------|--------|---------------|
+| `fact_ventas` | UPSERT | hmcrm | id_oportunidad (=VIN) |
+| `fact_plan` | UPSERT | hmcrm | anio_mes, id_sucursal, modelo |
+| `fact_flujos_piso` | UPSERT | hmcrm | fecha, id_sucursal |
+| `fact_inventario` | DELETE+INSERT | hmcrm | fecha_snapshot |
+| `fact_os_abierta` | DELETE+INSERT | metrics | fecha_snapshot |
+| `fact_os_abierta_detalle` | DELETE+INSERT | metrics | fecha_snapshot |
+| `fact_inv_refacciones` | UPSERT | metrics | fecha_snapshot, id_sucursal |
+| `fact_uio` | UPSERT | metrics | fecha_snapshot, id_sucursal |
+| `fact_estado_resultados` | UPSERT | sicofi.balanza | fecha, mui, seccion, rama, tipo |
+| `fact_ppto_estado_resultados` | UPSERT | sicofi.balanza_ppto | fecha, mui, seccion, rama, tipo |
+| `fact_postventa_kpis` | UPSERT | metrics | fecha, mui |
+| `fact_contable_servicio` | UPSERT | sicofi.balanza | fecha, mui, tipo |
+| `fact_ticket_promedio` | UPSERT | CSV manual | fecha, mui |
+
+### Tablas eliminadas (refactor 2026-04-01)
+- `fact_dealer_profile` → reemplazada por fact_estado_resultados + fact_contable_servicio + fact_postventa_kpis
+- `fact_servicio_kpi` → reemplazada por fact_postventa_kpis
+- `fact_ppto_servicio` → subsumida por fact_ppto_estado_resultados
+- `fact_ppto_edr` → reemplazada por fact_ppto_estado_resultados
 
 ### Vistas materializadas
-- `mv_kpis_mensual` — ventas + plan + cumplimiento + MoM + YoY
+- `mv_kpis_mensual` — ventas + plan + cumplimiento + YoY
 - `mv_cumplimiento_ventas` — ventas vs plan por modelo
 - `mv_aging_inventario` — distribucion aging por sucursal
 
-## ETL Scripts
-
-Todos en `data-pipeline/etl/scripts/`. Ejecutar desde `data-pipeline/`:
-
-```bash
-# Ventas (Fase 1)
-python etl/scripts/etl_ventas.py --full          # 2,744 registros
-python etl/scripts/etl_plan_ventas.py            # 48 registros (unpivot)
-python etl/scripts/etl_flujos_piso.py            # 753 registros
-python etl/scripts/etl_inventario.py             # 2,579 registros (snapshot)
-
-# Postventa (Fase 2)
-python etl/scripts/etl_servicio_kpi.py           # 1,189 registros
-python etl/scripts/etl_os_abierta.py             # 5 agg + 35 detalle
-python etl/scripts/etl_inv_refacciones.py        # 2 registros
-python etl/scripts/etl_uio.py                    # 2 registros
-python etl/scripts/etl_dealer_profile.py         # 161 registros (41 KPIs x 2 suc x ~2 meses)
-python etl/scripts/etl_ppto_servicio.py          # 48 registros
-python etl/scripts/etl_ppto_edr.py               # 817 registros
-```
-
-### Conectores disponibles en utils.py
-- `postgres` — PG_* vars
-- `mysql` — MYSQL_* vars (no usado actualmente)
-- `metrics` — METRICS_* vars
-- `hmcrm` — HMCRM_* vars
-- `sicofi` — SICOFI_* vars
-
-## Queries de extracción
-
-### data-pipeline/etl/extract/postventa/
-
-| Archivo                            | BD      | Descripción                                    |
-|------------------------------------|---------|------------------------------------------------|
-| extract_oskpi.sql                  | metrics | KPIs diarios servicio (cantidad OS, horas MO, venta) |
-| extract_os_abierta.sql             | metrics | OS abiertas fuera de SLA (agregado)            |
-| extract_os_abierta_detalle.sql     | metrics | OS abiertas fuera de SLA (detalle individual)  |
-| extract_inv_refacciones.sql        | metrics | Inventario refacciones (movimiento/nuevo/obsoleto) |
-| extract_dealer_profile.sql         | metrics | 60 KPIs mensuales dealer profile (41 curados, ver docs/dealer_profile_kpis.md) |
-| extract_UIO.sql                    | metrics | Units In Operation (VINs únicos servicio)      |
-| extract_pptoSicofi.sql             | sicofi  | Presupuesto ingresos servicio + MO             |
-| extract_ppto_estado_resultados.sql | sicofi  | Presupuesto EdR completo (ingresos/costos/gastos) |
-
-### data-pipeline/etl/extract/ventas/
-
-| Archivo                            | BD    | Descripción                                   |
-|------------------------------------|-------|------------------------------------------------|
-| extract_ventas.sql                 | hmcrm | Ventas diarias por modelo/VIN (2024+)          |
-| extract_plan_ventas.sql            | hmcrm | Plan de ventas mensual por modelo              |
-| extract_flujos_piso.sql            | hmcrm | Flujos de piso diarios (FreshUp + Internet)    |
-| extract_llegadavin_inventario.sql  | hmcrm | Fecha de llegada por VIN (para aging inventario)|
-
 ## API Endpoints
 
-Base: `/api/v1/`
+Base: `/api/v1/`. Params comunes: `anio_mes: str` (YYYY-MM), `mui: int` (6 o 8, opcional).
 
-### Ventas (`/api/v1/ventas/`)
-- `GET /resumen` — KPIs mensuales desde mv_kpis_mensual
-- `GET /tendencia` — Venta diaria acumulada vs plan prorrateado
-- `GET /por-modelo` — Ranking modelos por unidades
-- `GET /flujos` — Flujos de piso diarios
-- `GET /detalle` — Drill-down VINs vendidos
+- **ventas/**: resumen, tendencia, por-modelo, flujos, detalle, cumplimiento-pacing (devuelve `{total, sucursales[]}` con ventas al 'mismo día' vs plan prorrateado, mes anterior y año anterior — usado por las cards por sucursal del Resumen Ejecutivo)
+- **postventa/**: summary (OTs, horas, venta total/MO contable, ticket, plan), trend, os-abiertas, os-abiertas/detalle, refacciones, uio
+- **financiero/**: financials (UB, UO, absorcion, gastos desglosados, ppto, EdR detalle, acumulado YTD)
+- **inventario/**: aging, detalle
+- **health/**: GET / (status check)
 
-### Postventa (`/api/v1/postventa/`)
-- `GET /servicio-kpis` — KPIs servicio + dealer profile P1 + ppto
-- `GET /os-abiertas` — OS fuera de SLA agregado + DP
-- `GET /os-abiertas/detalle` — Drill-down OS individuales
-- `GET /refacciones` — Inventario refacciones por categoria
-- `GET /uio` — Units In Operation
+### Formulas financieras (de fact_estado_resultados)
+- **Utilidad Bruta** = SUM(monto) WHERE seccion IN ('INGRESOS','COSTOS')
+- **Utilidad Operacion** = SUM(monto) WHERE seccion IN ('INGRESOS','COSTOS','GASTOS')
+- **Tasa Absorcion** = UB Postventa / (Gastos Fijos + Comisiones Servicio + Otros Gastos) × 100
+- En ppto (balanza_ppto) los montos son positivos → resta explicita: Ingresos - Costos - Gastos
 
-### Financiero (`/api/v1/financiero/`)
-- `GET /edr` — Estado de Resultados presupuestado (solo ppto, sin reales)
-- `GET /dealer-profile` — KPIs P2 gastos + servicio financiero con MoM
-- `GET /ventas-kpis` — KPIs P1 ventas nuevos (id 1-7)
+## Alertas de calidad de datos
 
-### Inventario (`/api/v1/inventario/`)
-- `GET /aging` — Distribucion aging por sucursal
-- `GET /detalle` — Drill-down por VIN con dias en piso
-
-Params comunes: `anio_mes: str` (YYYY-MM), `mui: int` (6 o 8, opcional)
-
-## Dealer Profile KPIs
-
-60 KPIs totales en catalogo. 41 curados para el dashboard:
-- **P1 (27 KPIs)**: Venta nuevos (7), servicio operativo (14), OS abiertas (4), UIO (2)
-- **P2 (14 KPIs)**: Gastos (8), servicio financiero (6)
-- **Descartados (19 KPIs)**: Sin datos (12), seminuevos sin actividad (7)
-
-Ver detalle completo en `docs/dealer_profile_kpis.md`.
-
-## Alertas de calidad de datos conocidas
-
-### ventas (hmcrm)
-- **Tecate**: 191 registros — excluidos con `hus_ciudad IN ('Tijuana', 'Mexicali')`
-- 26 VINs duplicados encontrados y deduplicados en ETL
-
-### servicio_ventas (metrics)
-- `telefono`: 77% vacío
-- `numero_cliente`: 52% vacío
-- `marca` incluye valores "NO HONDA" e "ITALIKA" (servicio multimarca)
-- Campos venta_tot/costo_tot/descuento_* son >99% zero en motos
-
-### os_proceso (metrics)
-- `costo`: 100% en cero — no se carga; usar `venta` y `costo_refaccion`/`venta_total_ref`
-
-### refacciones_inventario (metrics)
-- `existencia` es VARCHAR, no numérico — requiere CAST para cálculos
-
-### sicofi.balanza_ppto
-- Falta año 2023 completo
-- `acumulado` siempre en cero — solo `mensual` tiene datos
-- **balanza** (datos reales) NO tiene datos para HONDA MOTOS — solo presupuesto disponible
-
-## Frontend
-
-Branding Honda: rojo #CC0000 primary, gris #333 secondary, rojo claro #E53935 accent.
-
-### Paginas
-- `/` — Resumen ejecutivo (KPI cards + grid por sucursal)
-- `/ventas` — Tendencia, modelos, flujos, detalle VINs
-- `/postventa` — Servicio KPIs, OS abiertas, refacciones, UIO
-- `/inventario` — Aging distribution, detalle por VIN
-- `/financiero` — EdR presupuestado, gastos, rentabilidad servicio, KPIs ventas DP
-
-### Componentes UI reutilizables
-- `KPICard` — Tarjeta de indicador con delta MoM
-- `DataGrid<T>` — Grid de cards clickeables + panel de detalle
-- `AgencyPills` — Filtro Tijuana/Mexicali/Todas
-- `MonthPicker` — Selector YYYY-MM
-- `LoadingState` — Skeletons (cards/table/spinner)
+- **Tecate**: 191 registros en hmcrm — excluidos con `hus_ciudad IN ('Tijuana', 'Mexicali')`
+- **VINs duplicados**: deduplicados por VIN en ETL (venta cancelada + re-venta = 1 venta, la mas reciente)
+- **servicio_ventas**: telefono 77% vacio, numero_cliente 52% vacio, marca incluye "NO HONDA"/"ITALIKA"
+- **os_proceso.costo**: 100% cero — usar `venta` y `costo_refaccion`/`venta_total_ref`
+- **refacciones_inventario.existencia**: VARCHAR, requiere CAST
+- **sicofi.balanza**: datos Honda Motos bajo marca='HONDA' con terminaciones 4/5/6 (no 'HONDA MOTOS' directo)
+- **sicofi.balanza_ppto**: falta 2023, `acumulado` siempre cero (usar `mensual`)
 
 ## Convenciones
 
 - MUI = marca_unidad_id (identificador universal de sucursal)
 - Queries SQL usan `mui` como alias de salida para el ID de sucursal
-- ETL SQL usa placeholders Jinja `{{ param }}` donde corresponda
 - Endpoints API: `/api/v1/<modulo>/<accion>`
 - Frontend components: PascalCase, un archivo por componente
-
-## Comandos
-
-```bash
-# Frontend
-cd frontend && npm install && npm run dev
-
-# Backend
-cd backend && pip install -r requirements.txt
-uvicorn backend.app.main:app --reload
-
-# ETL (desde data-pipeline/)
-cd data-pipeline
-python etl/scripts/etl_ventas.py --full
-python etl/scripts/etl_plan_ventas.py
-
-# Scripts de exploración
-python data-pipeline/scripts/eda_motos_tj_mx.py
-python data-pipeline/scripts/explorar_metrics_motos.py
-```
+- Branding Honda: rojo `#CC0000` primary, gris `#333` secondary, rojo `#E53935` accent
+- CSS variables en `frontend/src/app/globals.css` (light + dark mode)
+- White-label: cambiar `CLIENT_NAME`/`CLIENT_TAGLINE` en `constants.ts` + CSS vars + logo en `public/`

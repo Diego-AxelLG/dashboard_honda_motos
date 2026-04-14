@@ -26,6 +26,11 @@ def ventas_flujos(mui: int | None = None, anio_mes: str | None = None, db: Sessi
     return ventas_service.get_flujos(db, mui, anio_mes)
 
 
+@router.get("/cumplimiento-pacing")
+def ventas_cumplimiento_pacing(mui: int | None = None, anio_mes: str | None = None, db: Session = Depends(get_db)):
+    return ventas_service.get_cumplimiento_pacing(db, mui, anio_mes)
+
+
 @router.get("/detalle")
 def ventas_detalle(mui: int | None = None, anio_mes: str | None = None, db: Session = Depends(get_db)):
     return ventas_service.get_detalle(db, mui, anio_mes)

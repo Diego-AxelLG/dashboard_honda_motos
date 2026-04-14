@@ -1,24 +1,12 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from backend.app.core.database import get_db
+from backend.app.services import financiero_service
 
 router = APIRouter()
 
 
 @router.get("/monthly")
-def kpis_monthly(mui: int | None = None, anio_mes: str | None = None):
-    """Placeholder — retorna KPIs de ejemplo."""
-    return [
-        {
-            "mui": 1,
-            "nombre_agencia": "Agencia Ejemplo Norte",
-            "qty_nuevos": 42,
-            "plan": 50,
-            "cumplimiento_pct": 84.0,
-        },
-        {
-            "mui": 2,
-            "nombre_agencia": "Agencia Ejemplo Sur",
-            "qty_nuevos": 38,
-            "plan": 45,
-            "cumplimiento_pct": 84.4,
-        },
-    ]
+def kpis_monthly(mui: int | None = None, anio_mes: str | None = None, db: Session = Depends(get_db)):
+    """KPIs mensuales consolidados — delegado a financials."""
+    return financiero_service.get_financials(db, mui, anio_mes)

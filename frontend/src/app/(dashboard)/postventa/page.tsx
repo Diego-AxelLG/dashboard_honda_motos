@@ -3,12 +3,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
-    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-    ResponsiveContainer, PieChart, Pie, Cell,
+    PieChart, Pie, Cell, Tooltip, ResponsiveContainer,
+    LineChart, Line, XAxis, YAxis, CartesianGrid, Legend,
 } from "recharts";
 import {
-    getServicioKpis, getOsAbiertas, getOsAbiertasDetalle,
-    getRefacciones, getUio,
+    getPostventaSummary, getOsAbiertas, getOsAbiertasDetalle,
+    getRefacciones, getUio, getPostventaOtsTendencia,
 } from "@/lib/api";
 import { AGENCIES } from "@/lib/constants";
 import { fmtCurrency, fmtNumber, fmtPct, fmtDate } from "@/lib/utils";
@@ -18,81 +18,33 @@ import { KPICard, LoadingState, AgencyPills, MonthPicker } from "@/components/ui
 // Types
 // ---------------------------------------------------------------------------
 
-interface ServicioKPI { id_sucursal: number; sucursal: string; cantidad_os: number; horas_mo: number; venta_mo: number; venta_total: number }
-interface DPRow { id_sucursal: number; dealer_profile_id: number; nombre: string; valor: number | null; sub_valor: number | null }
-interface PptoRow { id_sucursal: number; tipo_ppto: string; plan_ppto: number }
-interface OsAgregado { id_sucursal: number; tipo_orden: string; cantidad_os: number; fecha_snapshot: string }
-interface OsDetalle { id_sucursal: number; numero_ot: string; vin: string; tipo_orden: string; nombre_asesor: string; nombre_cliente: string; fecha_apertura: string; dias_abierta: number; monto_venta: number; situacion: string; taller: string }
-interface Refaccion { id_sucursal: number; sucursal: string; movimiento: number; nuevo: number; tec_obsoleto: number; obsoleto: number; total: number }
-interface UioRow { id_sucursal: number; sucursal: string; uio: number; uio_mp: number; uio_ap: number }
-
-// ---------------------------------------------------------------------------
-// Mock data
-// ---------------------------------------------------------------------------
-
-const MOCK_SVC_KPIS: ServicioKPI[] = [
-    { id_sucursal: 6, sucursal: "Honda Motos Tijuana", cantidad_os: 320, horas_mo: 1280, venta_mo: 850000, venta_total: 1850000 },
-    { id_sucursal: 8, sucursal: "Honda Motos Mexicali", cantidad_os: 240, horas_mo: 960, venta_mo: 620000, venta_total: 1200000 },
-];
-
-const MOCK_DP: DPRow[] = [
-    { id_sucursal: 6, dealer_profile_id: 29, nombre: "Servicio $", valor: 1850000, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 30, nombre: "Cantidad O/S", valor: 320, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 33, nombre: "Facturación MO", valor: 850000, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 34, nombre: "Facturación Ref", valor: 680000, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 38, nombre: "Tasa absorción", valor: 105.2, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 49, nombre: "Ticket prom $", valor: 5781, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 69, nombre: "Ticket prom hrs", valor: 4.0, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 36, nombre: "MO x O/S", valor: 2656, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 37, nombre: "REF x O/S", valor: 2125, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 41, nombre: "TEMOC", valor: 85.3, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 47, nombre: "Técnicos", valor: 8, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 44, nombre: "Productividad", valor: 72.5, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 48, nombre: "Total Horas MO", valor: 1280, sub_valor: null },
-];
-
-const MOCK_OS_DP: DPRow[] = [
-    { id_sucursal: 6, dealer_profile_id: 76, nombre: "Total", valor: 15, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 71, nombre: "Público", valor: 8, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 72, nombre: "Garantía", valor: 4, sub_valor: null },
-    { id_sucursal: 6, dealer_profile_id: 74, nombre: "Interno", valor: 3, sub_valor: null },
-];
-
-const MOCK_OS_DET: OsDetalle[] = [
-    { id_sucursal: 6, numero_ot: "OT2026001", vin: "LHJCJ1234M0001", tipo_orden: "Público", nombre_asesor: "Carlos R.", nombre_cliente: "Juan P.", fecha_apertura: "2026-03-10", dias_abierta: 21, monto_venta: 3500, situacion: "En Taller", taller: "Taller 1" },
-];
-
-const MOCK_REF: Refaccion[] = [
-    { id_sucursal: 6, sucursal: "Honda Motos Tijuana", movimiento: 250, nuevo: 80, tec_obsoleto: 320, obsoleto: 350, total: 1000 },
-    { id_sucursal: 8, sucursal: "Honda Motos Mexicali", movimiento: 200, nuevo: 70, tec_obsoleto: 290, obsoleto: 340, total: 900 },
-];
-
-const MOCK_UIO: UioRow[] = [
-    { id_sucursal: 6, sucursal: "Honda Motos Tijuana", uio: 5200, uio_mp: 3400, uio_ap: 1800 },
-    { id_sucursal: 8, sucursal: "Honda Motos Mexicali", uio: 3800, uio_mp: 2500, uio_ap: 1300 },
-];
+interface PVSummary {
+    mui: number; sucursal: string;
+    ots: number; horas_mo: number;
+    venta_total: number; venta_mo: number;
+    ticket_promedio: number | null;
+    plan_servicio: number; plan_mo: number;
+}
+interface OsAgregado { mui: number; tipo_orden: string; cantidad_os: number; fecha_snapshot: string }
+interface OsDetalle { mui: number; numero_ot: string; vin: string; tipo_orden: string; nombre_asesor: string; nombre_cliente: string; fecha_apertura: string; dias_abierta: number; monto_venta: number; situacion: string; taller: string }
+interface Refaccion { mui: number; sucursal: string; movimiento: number; nuevo: number; tec_obsoleto: number; obsoleto: number; total: number }
+interface UioRow { mui: number; sucursal: string; uio: number; uio_mp: number; uio_ap: number }
+interface OtsPunto { fecha: string; ots_acumuladas: number; ots_mes_anterior: number; ots_anio_anterior: number }
+interface OtsTendencia {
+    puntos: OtsPunto[];
+    totales: { ots_actual: number; ots_mes_anterior: number; ots_anio_anterior: number; var_mom_pct: number | null; var_yoy_pct: number | null } | null;
+    cutoff_day: number;
+    dias_mes: number;
+}
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const PIE_COLORS = ["var(--success)", "#3b82f6", "#f59e0b", "var(--danger)"];
-const OS_SLA: Record<string, number> = { "Público": 3, "Garantía": 45, "Interno": 31 };
+const OS_SLA: Record<string, number> = { "Publico con +3 dias": 3, "Garantia con +45 dias": 45, "Interno con +31 dias": 31 };
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function dpVal(rows: DPRow[], suc: number | null, dpId: number): number | null {
-    const match = rows.filter(r => r.dealer_profile_id === dpId && (suc == null || r.id_sucursal === suc));
-    if (!match.length) return null;
-    if (suc == null) return match.reduce((s, r) => s + (r.valor ?? 0), 0);
-    return match[0]?.valor ?? null;
-}
-
-function getCurrentMonth(): string {
-    return new Date().toISOString().slice(0, 7);
-}
+function getCurrentMonth(): string { return new Date().toISOString().slice(0, 7); }
 
 // ---------------------------------------------------------------------------
 // Page
@@ -102,42 +54,45 @@ export default function PostventaPage() {
     const [mes, setMes] = useState(getCurrentMonth());
     const [mui, setMui] = useState<number | null>(null);
     const [loading, setLoading] = useState(true);
+    const [fetchError, setFetchError] = useState(false);
     const [showOsDetalle, setShowOsDetalle] = useState(false);
 
-    const [svcKpis, setSvcKpis] = useState<ServicioKPI[]>([]);
-    const [dp, setDp] = useState<DPRow[]>([]);
-    const [ppto, setPpto] = useState<PptoRow[]>([]);
-    const [osDp, setOsDp] = useState<DPRow[]>([]);
+    const [summary, setSummary] = useState<PVSummary[]>([]);
+    const [osAgregado, setOsAgregado] = useState<OsAgregado[]>([]);
     const [osDetalle, setOsDetalle] = useState<OsDetalle[]>([]);
     const [refacciones, setRefacciones] = useState<Refaccion[]>([]);
     const [uio, setUio] = useState<UioRow[]>([]);
+    const [otsTend, setOtsTend] = useState<OtsTendencia | null>(null);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
+        setFetchError(false);
         const params = { anio_mes: mes, ...(mui ? { mui } : {}) };
         const muiOnly = mui ? { mui } : {};
         try {
-            const [svc, os, osDet, ref, u] = await Promise.all([
-                getServicioKpis(params).catch(() => null),
+            const [pv, os, osDet, ref, u, ots] = await Promise.all([
+                getPostventaSummary(params).catch(() => null),
                 getOsAbiertas(muiOnly).catch(() => null),
                 getOsAbiertasDetalle(muiOnly).catch(() => null),
                 getRefacciones(muiOnly).catch(() => null),
                 getUio(muiOnly).catch(() => null),
+                getPostventaOtsTendencia(params).catch(() => null),
             ]);
-            setSvcKpis(svc?.kpis?.length ? svc.kpis : MOCK_SVC_KPIS);
-            setDp(svc?.dealer_profile?.length ? svc.dealer_profile : MOCK_DP);
-            setPpto(svc?.presupuesto ?? []);
-            setOsDp(os?.dealer_profile?.length ? os.dealer_profile : MOCK_OS_DP);
-            setOsDetalle(osDet?.length ? osDet : MOCK_OS_DET);
-            setRefacciones(ref?.length ? ref : MOCK_REF);
-            setUio(u?.length ? u : MOCK_UIO);
+            if (!pv && !os && !osDet && !ref && !u && !ots) setFetchError(true);
+            setSummary(pv ?? []);
+            setOsAgregado(os?.agregado ?? []);
+            setOsDetalle(osDet ?? []);
+            setRefacciones(ref ?? []);
+            setUio(u ?? []);
+            setOtsTend(ots ?? null);
         } catch {
-            setSvcKpis(MOCK_SVC_KPIS);
-            setDp(MOCK_DP);
-            setOsDp(MOCK_OS_DP);
-            setOsDetalle(MOCK_OS_DET);
-            setRefacciones(MOCK_REF);
-            setUio(MOCK_UIO);
+            setFetchError(true);
+            setSummary([]);
+            setOsAgregado([]);
+            setOsDetalle([]);
+            setRefacciones([]);
+            setUio([]);
+            setOtsTend(null);
         } finally {
             setLoading(false);
         }
@@ -146,10 +101,29 @@ export default function PostventaPage() {
     useEffect(() => { fetchData(); }, [fetchData]);
 
     // Derived
-    const filteredRef = mui ? refacciones.filter(r => r.id_sucursal === mui) : refacciones;
-    const filteredUio = mui ? uio.filter(r => r.id_sucursal === mui) : uio;
+    const filteredSummary = mui ? summary.filter(s => s.mui === mui) : summary;
+    const totalOts = filteredSummary.reduce((s, r) => s + r.ots, 0);
+    const totalHoras = filteredSummary.reduce((s, r) => s + r.horas_mo, 0);
+    const totalVenta = filteredSummary.reduce((s, r) => s + r.venta_total, 0);
+    const totalMO = filteredSummary.reduce((s, r) => s + r.venta_mo, 0);
+    const totalPlanServicio = filteredSummary.reduce((s, r) => s + r.plan_servicio, 0);
+    const cumplServicio = totalPlanServicio > 0 ? (totalVenta / totalPlanServicio) * 100 : null;
+    const ticketProm = totalOts > 0 ? totalVenta / totalOts : null;
+    const ticketHrs = totalOts > 0 ? totalHoras / totalOts : null;
+    const moXos = totalOts > 0 ? totalMO / totalOts : null;
 
-    // Refacciones pie data
+    // OS agrupadas por tipo
+    const filteredOs = mui ? osAgregado.filter(o => o.mui === mui) : osAgregado;
+    const osByTipo = filteredOs.reduce<Record<string, number>>((acc, o) => {
+        acc[o.tipo_orden] = (acc[o.tipo_orden] ?? 0) + o.cantidad_os;
+        return acc;
+    }, {});
+    const totalOs = Object.values(osByTipo).reduce((s, v) => s + v, 0);
+
+    const filteredRef = mui ? refacciones.filter(r => r.mui === mui) : refacciones;
+    const filteredUio = mui ? uio.filter(r => r.mui === mui) : uio;
+
+    // Refacciones pie
     const refTotals = filteredRef.reduce(
         (acc, r) => ({ movimiento: acc.movimiento + r.movimiento, nuevo: acc.nuevo + r.nuevo, tec_obsoleto: acc.tec_obsoleto + r.tec_obsoleto, obsoleto: acc.obsoleto + r.obsoleto }),
         { movimiento: 0, nuevo: 0, tec_obsoleto: 0, obsoleto: 0 },
@@ -187,82 +161,116 @@ export default function PostventaPage() {
                 </div>
             </div>
 
-            {/* KPI Row — Principal */}
+            {fetchError && (
+                <div className="rounded-lg border border-[var(--danger)]/30 bg-[var(--danger)]/5 px-4 py-3 text-sm text-[var(--danger)]">
+                    No se pudieron cargar datos del servidor. Verifica que el backend est&eacute; corriendo en el puerto 8001.
+                </div>
+            )}
+
+            {/* KPI Row */}
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-8">
-                <KPICard title="Servicio $" value={dpVal(dp, mui, 29)} format="currency" />
-                <KPICard title="Cantidad O/S" value={dpVal(dp, mui, 30)} format="number" />
-                <KPICard title="Facturaci\u00f3n MO" value={dpVal(dp, mui, 33)} format="currency" />
-                <KPICard title="Facturaci\u00f3n Ref" value={dpVal(dp, mui, 34)} format="currency" />
-                <KPICard title="Ticket Prom $" value={dpVal(dp, mui, 49)} format="currency" />
-                <KPICard title="Ticket Prom Hrs" value={dpVal(dp, mui, 69)} format="number" />
-                <KPICard title="Tasa Absorci\u00f3n" value={dpVal(dp, mui, 38)} format="percent" subtitle={(dpVal(dp, mui, 38) ?? 0) >= 100 ? "Sano" : "Bajo meta"} />
-                {ppto.length > 0 && (
-                    <KPICard title="Ppto Servicio" value={ppto.reduce((s, p) => s + p.plan_ppto, 0)} format="currency" subtitle="presupuesto mes" />
+                <KPICard title="Venta Total" value={totalVenta || null} format="currency" subtitle={cumplServicio != null ? `${fmtPct(cumplServicio)} vs plan` : undefined} />
+                <KPICard title="Venta MO" value={totalMO || null} format="currency" />
+                <KPICard title="OTs" value={totalOts || null} format="number" />
+                <KPICard title="Horas MO" value={totalHoras || null} format="number" />
+                <KPICard title="Ticket Prom $" value={ticketProm} format="currency" />
+                <KPICard title="Ticket Prom Hrs" value={ticketHrs} format="number" />
+                <KPICard title="MO x O/S" value={moXos} format="currency" />
+                <KPICard title="Plan Servicio" value={totalPlanServicio || null} format="currency" subtitle="presupuesto mes" />
+            </div>
+
+            {/* OTs — tendencia diaria */}
+            <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-5">
+                <div className="mb-4 flex items-start justify-between gap-4">
+                    <div>
+                        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Evoluci&oacute;n Diaria de OTs</h3>
+                        <p className="mt-0.5 text-xs text-[var(--text-muted)]">Acumulado del mes actual vs mes anterior vs a&ntilde;o pasado</p>
+                    </div>
+                    {otsTend?.totales && (
+                        <div className="flex flex-wrap gap-2">
+                            {otsTend.totales.var_mom_pct != null && (
+                                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${otsTend.totales.var_mom_pct >= 0 ? "bg-[var(--success)]/10 text-[var(--success)]" : "bg-[var(--danger)]/10 text-[var(--danger)]"}`}>
+                                    {otsTend.totales.var_mom_pct > 0 ? "+" : ""}{otsTend.totales.var_mom_pct.toFixed(1)}% MoM
+                                </span>
+                            )}
+                            {otsTend.totales.var_yoy_pct != null && (
+                                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${otsTend.totales.var_yoy_pct >= 0 ? "bg-[var(--success)]/10 text-[var(--success)]" : "bg-[var(--danger)]/10 text-[var(--danger)]"}`}>
+                                    {otsTend.totales.var_yoy_pct > 0 ? "+" : ""}{otsTend.totales.var_yoy_pct.toFixed(1)}% YoY
+                                </span>
+                            )}
+                        </div>
+                    )}
+                </div>
+                {otsTend && otsTend.puntos.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={350}>
+                        <LineChart data={otsTend.puntos}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                            <XAxis dataKey="fecha" tickFormatter={(v: string) => v.slice(8)} tick={{ fontSize: 11 }} stroke="var(--text-muted)" />
+                            <YAxis tick={{ fontSize: 11 }} stroke="var(--text-muted)" />
+                            <Tooltip
+                                contentStyle={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border-color)", borderRadius: 8 }}
+                                labelFormatter={(v: string) => fmtDate(v)}
+                                formatter={(v: number) => fmtNumber(v)}
+                            />
+                            <Legend wrapperStyle={{ fontSize: 12 }} />
+                            <Line type="monotone" dataKey="ots_anio_anterior" name="Año pasado" stroke="var(--text-muted)" strokeOpacity={0.5} strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
+                            <Line type="monotone" dataKey="ots_mes_anterior" name="Mes anterior" stroke="var(--text-muted)" strokeWidth={1.5} dot={false} />
+                            <Line type="monotone" dataKey="ots_acumuladas" name="Mes actual" stroke="var(--brand-primary)" strokeWidth={2.5} dot={false} />
+                        </LineChart>
+                    </ResponsiveContainer>
+                ) : (
+                    <p className="py-8 text-center text-sm text-[var(--text-muted)]">Sin datos de OTs para este mes</p>
                 )}
             </div>
 
-            {/* Metricas operativas */}
-            <div>
-                <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-[var(--text-muted)]">M\u00e9tricas Operativas</h2>
-                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-                    <KPICard title="MO x O/S" value={dpVal(dp, mui, 36)} format="currency" />
-                    <KPICard title="REF x O/S" value={dpVal(dp, mui, 37)} format="currency" />
-                    <KPICard title="TEMOC" value={dpVal(dp, mui, 41)} format="percent" />
-                    <KPICard title="Total Hrs MO" value={dpVal(dp, mui, 48)} format="number" />
-                    <KPICard title="T\u00e9cnicos" value={dpVal(dp, mui, 47)} format="number" />
-                    <KPICard title="Productividad" value={dpVal(dp, mui, 44)} format="percent" />
-                </div>
-            </div>
-
-            {/* OS Abiertas Semaforo */}
+            {/* OS Abiertas */}
             <div>
                 <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-[var(--text-muted)]">OS Abiertas Fuera de SLA</h2>
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                    {[
-                        { id: 76, label: "Total", sla: null },
-                        { id: 71, label: "P\u00fablico", sla: OS_SLA["Público"] },
-                        { id: 72, label: "Garant\u00eda", sla: OS_SLA["Garantía"] },
-                        { id: 74, label: "Interno", sla: OS_SLA["Interno"] },
-                    ].map(({ id, label, sla }) => {
-                        const val = dpVal(osDp, mui, id);
-                        const isAlert = val != null && val > 0;
-                        return (
-                            <div key={id} className={`rounded-xl border p-4 ${isAlert ? "border-[var(--danger)]/50 bg-[var(--danger)]/5" : "border-[var(--border-color)] bg-[var(--bg-card)]"}`}>
-                                <p className="text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">{label}</p>
-                                <p className={`mt-1 text-2xl font-bold ${isAlert ? "text-[var(--danger)]" : "text-[var(--success)]"}`}>{val ?? 0}</p>
-                                {sla && <p className="text-[10px] text-[var(--text-muted)]">SLA: {sla} d\u00edas</p>}
-                            </div>
-                        );
-                    })}
+                    <div className={`rounded-xl border p-4 ${totalOs > 0 ? "border-[var(--danger)]/50 bg-[var(--danger)]/5" : "border-[var(--border-color)] bg-[var(--bg-card)]"}`}>
+                        <p className="text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">Total</p>
+                        <p className={`mt-1 text-2xl font-bold ${totalOs > 0 ? "text-[var(--danger)]" : "text-[var(--success)]"}`}>{totalOs}</p>
+                    </div>
+                    {Object.entries(osByTipo).map(([tipo, cant]) => (
+                        <div key={tipo} className={`rounded-xl border p-4 ${cant > 0 ? "border-[var(--danger)]/50 bg-[var(--danger)]/5" : "border-[var(--border-color)] bg-[var(--bg-card)]"}`}>
+                            <p className="text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">{tipo}</p>
+                            <p className={`mt-1 text-2xl font-bold ${cant > 0 ? "text-[var(--danger)]" : "text-[var(--success)]"}`}>{cant}</p>
+                            {OS_SLA[tipo] && <p className="text-[10px] text-[var(--text-muted)]">SLA: {OS_SLA[tipo]} d&iacute;as</p>}
+                        </div>
+                    ))}
                 </div>
-                <button onClick={() => setShowOsDetalle(!showOsDetalle)} className="mt-3 text-xs font-medium text-[var(--brand-primary)] hover:underline">
-                    {showOsDetalle ? "Ocultar detalle" : "Ver detalle de OS abiertas"}
-                </button>
-                {showOsDetalle && (
-                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="mt-3 overflow-x-auto rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)]">
-                        <table className="w-full text-sm">
-                            <thead>
-                                <tr className="border-b border-[var(--border-color)] text-left text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">
-                                    <th className="p-3">OT</th><th className="p-3">VIN</th><th className="p-3">Tipo</th><th className="p-3">Cliente</th><th className="p-3">Asesor</th><th className="p-3">Apertura</th><th className="p-3 text-right">D\u00edas</th><th className="p-3 text-right">Monto</th><th className="p-3">Situaci\u00f3n</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {osDetalle.map((d) => (
-                                    <tr key={d.numero_ot} className="border-b border-[var(--border-color)]/50 hover:bg-[var(--bg-card-hover)]">
-                                        <td className="p-3 font-mono text-xs">{d.numero_ot}</td>
-                                        <td className="p-3 font-mono text-xs">{d.vin}</td>
-                                        <td className="p-3">{d.tipo_orden}</td>
-                                        <td className="p-3">{d.nombre_cliente}</td>
-                                        <td className="p-3">{d.nombre_asesor}</td>
-                                        <td className="p-3 text-[var(--text-secondary)]">{fmtDate(d.fecha_apertura)}</td>
-                                        <td className={`p-3 text-right font-bold ${d.dias_abierta > (OS_SLA[d.tipo_orden] ?? 30) ? "text-[var(--danger)]" : "text-[var(--text-primary)]"}`}>{d.dias_abierta}</td>
-                                        <td className="p-3 text-right">{fmtCurrency(d.monto_venta)}</td>
-                                        <td className="p-3">{d.situacion}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </motion.div>
+                {osDetalle.length > 0 && (
+                    <>
+                        <button onClick={() => setShowOsDetalle(!showOsDetalle)} className="mt-3 text-xs font-medium text-[var(--brand-primary)] hover:underline">
+                            {showOsDetalle ? "Ocultar detalle" : "Ver detalle de OS abiertas"}
+                        </button>
+                        {showOsDetalle && (
+                            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="mt-3 overflow-x-auto rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)]">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b border-[var(--border-color)] text-left text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">
+                                            <th className="p-3">OT</th><th className="p-3">VIN</th><th className="p-3">Tipo</th><th className="p-3">Cliente</th><th className="p-3">Asesor</th><th className="p-3">Apertura</th><th className="p-3 text-right">D&iacute;as</th><th className="p-3 text-right">Monto</th><th className="p-3">Situaci&oacute;n</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {osDetalle.map((d) => (
+                                            <tr key={d.numero_ot} className="border-b border-[var(--border-color)]/50 hover:bg-[var(--bg-card-hover)]">
+                                                <td className="p-3 font-mono text-xs">{d.numero_ot}</td>
+                                                <td className="p-3 font-mono text-xs">{d.vin}</td>
+                                                <td className="p-3">{d.tipo_orden}</td>
+                                                <td className="p-3">{d.nombre_cliente}</td>
+                                                <td className="p-3">{d.nombre_asesor}</td>
+                                                <td className="p-3 text-[var(--text-secondary)]">{fmtDate(d.fecha_apertura)}</td>
+                                                <td className="p-3 text-right font-bold text-[var(--danger)]">{d.dias_abierta}</td>
+                                                <td className="p-3 text-right">{fmtCurrency(d.monto_venta)}</td>
+                                                <td className="p-3">{d.situacion}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </motion.div>
+                        )}
+                    </>
                 )}
             </div>
 
@@ -273,7 +281,7 @@ export default function PostventaPage() {
                     <h3 className="mb-4 text-sm font-semibold text-[var(--text-primary)]">Units In Operation (UIO)</h3>
                     <div className="space-y-3">
                         {filteredUio.map(u => (
-                            <div key={u.id_sucursal} className="rounded-lg border border-[var(--border-color)] p-4">
+                            <div key={u.mui} className="rounded-lg border border-[var(--border-color)] p-4">
                                 <p className="text-sm font-semibold text-[var(--text-primary)]">{u.sucursal}</p>
                                 <div className="mt-2 grid grid-cols-3 gap-4 text-center">
                                     <div>
@@ -299,20 +307,26 @@ export default function PostventaPage() {
                     <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Inventario Refacciones</h3>
                     {pctObsoleto > 60 && (
                         <div className="mb-3 rounded-lg bg-[var(--danger)]/10 border border-[var(--danger)]/30 px-3 py-2 text-xs font-medium text-[var(--danger)]">
-                            {fmtPct(pctObsoleto)} del inventario es obsoleto o t\u00e9c. obsoleto
+                            {fmtPct(pctObsoleto)} del inventario es obsoleto o t&eacute;c. obsoleto
                         </div>
                     )}
-                    <ResponsiveContainer width="100%" height={220}>
-                        <PieChart>
-                            <Pie data={pieData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
-                                {pieData.map((_, idx) => (
-                                    <Cell key={idx} fill={PIE_COLORS[idx]} />
-                                ))}
-                            </Pie>
-                            <Tooltip formatter={(v: number) => fmtNumber(v)} />
-                        </PieChart>
-                    </ResponsiveContainer>
-                    <p className="mt-2 text-center text-xs text-[var(--text-muted)]">Total: {fmtNumber(refTotal)} items</p>
+                    {refTotal > 0 ? (
+                        <>
+                            <ResponsiveContainer width="100%" height={220}>
+                                <PieChart>
+                                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
+                                        {pieData.map((_, idx) => (
+                                            <Cell key={idx} fill={PIE_COLORS[idx]} />
+                                        ))}
+                                    </Pie>
+                                    <Tooltip formatter={(v: number) => fmtNumber(v)} />
+                                </PieChart>
+                            </ResponsiveContainer>
+                            <p className="mt-2 text-center text-xs text-[var(--text-muted)]">Total: {fmtNumber(refTotal)} items</p>
+                        </>
+                    ) : (
+                        <p className="py-8 text-center text-sm text-[var(--text-muted)]">Sin datos de refacciones</p>
+                    )}
                 </div>
             </div>
         </motion.div>

@@ -1,31 +1,53 @@
-# Environment
+# ----- Secretos / entorno -----
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
-# Python
+# ----- Python -----
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 venv/
 .venv/
+env/
 
-# Node
+# ----- Node / Next.js -----
 node_modules/
 .next/
 out/
+dist/
+build/
+*.tsbuildinfo
+next-env.d.ts
 
-# Logs
+# ----- Logs -----
 *.log
+logs/
+audit.log
 data-pipeline/logs/
 
-# IDE
+# ----- Datos / outputs ETL -----
+*.csv
+*.xlsx
+*.xls
+*.parquet
+!data-pipeline/etl/extract/postventa/ticket_promedio.csv
+data-pipeline/scripts/output/
+data-pipeline/exploracion/output/
+
+# ----- IDE / OS -----
 .vscode/
 .idea/
-
-# OS
+*.swp
 .DS_Store
 Thumbs.db
 
-# Claude
+# ----- Claude Code -----
 .claude/
+
+# ----- Boilerplate residual -----
+boilerplate/
