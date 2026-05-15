@@ -27,6 +27,7 @@ next-env.d.ts
 # ----- Logs -----
 *.log
 logs/
+prompts/
 audit.log
 data-pipeline/logs/
 
@@ -35,9 +36,13 @@ data-pipeline/logs/
 *.xlsx
 *.xls
 *.parquet
+# Inputs operativos que SI versionamos:
 !data-pipeline/etl/extract/postventa/ticket_promedio.csv
+!data-pipeline/csv/Plan_5_alas.csv
+!data-pipeline/csv/plan_postventa_2026.csv
 data-pipeline/scripts/output/
 data-pipeline/exploracion/output/
+exports/
 
 # ----- IDE / OS -----
 .vscode/
@@ -51,3 +56,7 @@ Thumbs.db
 
 # ----- Boilerplate residual -----
 boilerplate/
+
+# ----- Basura de merge / pip freeze accidental -----
+*.orig
+requirements.txt.orig

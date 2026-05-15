@@ -1,18 +1,18 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { motion } from "framer-motion";
+import { useEffect, useState, useCallback, useMemo, Fragment } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
     LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
-    Tooltip, Legend, ResponsiveContainer, ComposedChart, LabelList,
+    Tooltip, ResponsiveContainer, LabelList,
 } from "recharts";
 import {
     getVentasResumen, getVentasTendencia, getVentasPorModelo,
-    getVentasFlujos, getVentasDetalle, getVentasCumplimientoPacing,
+    getVentasCumplimientoPacing, getVentasPorAsesorModelo,
 } from "@/lib/api";
 import { AGENCIES } from "@/lib/constants";
 import { fmtNumber, fmtDate } from "@/lib/utils";
-import { LoadingState, AgencyPills, MonthPicker } from "@/components/ui";
+import { LoadingState, AgencyPills, MonthPicker, UltimaActualizacion } from "@/components/ui";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,9 +26,17 @@ interface Tendencia {
     ventas_anio_anterior: number;
 }
 interface Modelo { modelo: string; unidades: number; contado: number; financiamiento: number }
-interface Flujo { fecha: string; id_sucursal: number; freshup: number; internet: number; total: number }
-interface VentaDetalle { fecha: string; id_sucursal: number; sucursal: string; modelo: string; vin: string; venta_contado: boolean }
 interface Resumen { anio_mes: string; id_sucursal: number; sucursal: string; total_ventas: number; ventas_nuevos: number; monto_total: number; meta: number; pct_cumplimiento: number; var_pct_yoy: number }
+interface AsesorModeloRow {
+    id_vendedor: number;
+    asesor: string;
+    id_sucursal: number;
+    sucursal: string;
+    modelo: string;
+    unidades: number;
+    contado: number;
+    financiado: number;
+}
 interface PacingRow {
     ventas_actual: number;
     plan_total: number;
@@ -48,8 +56,6 @@ function getCurrentMonth(): string {
     return new Date().toISOString().slice(0, 7);
 }
 
-const PAGE_SIZE = 50;
-
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -59,46 +65,39 @@ export default function VentasPage() {
     const [mui, setMui] = useState<number | null>(null);
     const [loading, setLoading] = useState(true);
     const [fetchError, setFetchError] = useState(false);
-    const [tab, setTab] = useState<"ventas" | "flujos">("ventas");
-    const [page, setPage] = useState(0);
 
     const [resumen, setResumen] = useState<Resumen[]>([]);
     const [tendencia, setTendencia] = useState<Tendencia[]>([]);
     const [modelos, setModelos] = useState<Modelo[]>([]);
-    const [flujos, setFlujos] = useState<Flujo[]>([]);
-    const [detalle, setDetalle] = useState<VentaDetalle[]>([]);
     const [pacing, setPacing] = useState<PacingResponse | null>(null);
+    const [asesorModelo, setAsesorModelo] = useState<AsesorModeloRow[]>([]);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
         setFetchError(false);
-        setPage(0);
         const params = { anio_mes: mes, ...(mui ? { mui } : {}) };
         try {
-            const [res, tend, mod, flu, det, pac] = await Promise.all([
+            const [res, tend, mod, pac, am] = await Promise.all([
                 getVentasResumen(params).catch(() => null),
                 getVentasTendencia(params).catch(() => null),
                 getVentasPorModelo(params).catch(() => null),
-                getVentasFlujos(params).catch(() => null),
-                getVentasDetalle(params).catch(() => null),
                 getVentasCumplimientoPacing(params).catch(() => null),
+                getVentasPorAsesorModelo(params).catch(() => null),
             ]);
-            const anyFailed = !res && !tend && !mod && !flu && !det && !pac;
+            const anyFailed = !res && !tend && !mod && !pac;
             if (anyFailed) setFetchError(true);
             setResumen(res ?? []);
             setTendencia(tend ?? []);
             setModelos(mod ?? []);
-            setFlujos(flu ?? []);
-            setDetalle(det ?? []);
             setPacing(pac ?? null);
+            setAsesorModelo(am ?? []);
         } catch {
             setFetchError(true);
             setResumen([]);
             setTendencia([]);
             setModelos([]);
-            setFlujos([]);
-            setDetalle([]);
             setPacing(null);
+            setAsesorModelo([]);
         } finally {
             setLoading(false);
         }
@@ -119,8 +118,52 @@ export default function VentasPage() {
     const varMoM = p?.var_vs_mes_anterior_pct ?? null;
     const varYoY = p?.var_vs_anio_anterior_pct ?? null;
 
-    const pagedDetalle = detalle.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-    const totalPages = Math.ceil(detalle.length / PAGE_SIZE);
+    // Ranking de asesores: total + % financiadas + breakdown por modelo
+    const ranking = useMemo(() => {
+        if (asesorModelo.length === 0) return null;
+
+        type ModeloItem = { modelo: string; unidades: number; contado: number; financiado: number; pctFinan: number };
+        type AsesorItem = {
+            key: string; nombre: string; sucursal: string;
+            total: number; contado: number; financiado: number; pctFinan: number;
+            modelos: ModeloItem[];
+        };
+
+        const map = new Map<string, AsesorItem>();
+        for (const r of asesorModelo) {
+            const key = `${r.id_vendedor}|${r.asesor}`;
+            if (!map.has(key)) {
+                map.set(key, {
+                    key, nombre: r.asesor, sucursal: r.sucursal,
+                    total: 0, contado: 0, financiado: 0, pctFinan: 0, modelos: [],
+                });
+            }
+            const a = map.get(key)!;
+            a.total += r.unidades;
+            a.contado += r.contado;
+            a.financiado += r.financiado;
+            a.modelos.push({
+                modelo: r.modelo,
+                unidades: r.unidades,
+                contado: r.contado,
+                financiado: r.financiado,
+                pctFinan: r.unidades > 0 ? (r.financiado / r.unidades) * 100 : 0,
+            });
+        }
+
+        const asesores = Array.from(map.values())
+            .map(a => ({
+                ...a,
+                pctFinan: a.total > 0 ? (a.financiado / a.total) * 100 : 0,
+                modelos: a.modelos.sort((x, y) => y.unidades - x.unidades),
+            }))
+            .sort((a, b) => b.total - a.total);
+
+        const gran = asesores.reduce((s, a) => s + a.total, 0);
+        return { asesores, gran };
+    }, [asesorModelo]);
+
+    const [asesorAbierto, setAsesorAbierto] = useState<string | null>(null);
 
     const fmtSigned = (v: number | null) => v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(1)}%`;
     const colorPct = (v: number | null, goodPositive = true) => {
@@ -134,7 +177,6 @@ export default function VentasPage() {
         return (
             <div className="space-y-6">
                 <LoadingState variant="cards" count={4} columns={4} />
-                <LoadingState variant="table" count={8} />
             </div>
         );
     }
@@ -146,6 +188,9 @@ export default function VentasPage() {
                 <div>
                     <h1 className="text-lg font-bold text-[var(--text-primary)]">Ventas</h1>
                     <p className="mt-1 text-sm text-[var(--text-secondary)]">Evoluci&oacute;n diaria, ventas por modelo y KPIs del mes</p>
+                    <div className="mt-1">
+                        <UltimaActualizacion etls={["ventas", "plan_ventas"]} />
+                    </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                     <MonthPicker value={mes} onChange={setMes} min="2024-01" />
@@ -181,7 +226,6 @@ export default function VentasPage() {
                             contentStyle={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border-color)", borderRadius: 8 }}
                             labelFormatter={(v: string) => fmtDate(v)}
                         />
-                        <Legend wrapperStyle={{ fontSize: 12 }} />
                         <Line type="monotone" dataKey="ventas_anio_anterior" name="Año pasado" stroke="var(--text-muted)" strokeOpacity={0.5} strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
                         <Line type="monotone" dataKey="ventas_mes_anterior" name="Mes anterior" stroke="var(--text-muted)" strokeWidth={1.5} dot={false} />
                         <Line type="monotone" dataKey="plan_prorrateado" name="Plan" stroke="var(--danger)" strokeWidth={2} strokeDasharray="8 4" dot={false} />
@@ -239,79 +283,108 @@ export default function VentasPage() {
                 </div>
             </div>
 
-            {/* Tabs */}
-            <div className="flex gap-2 border-b border-[var(--border-color)] pb-1">
-                <button onClick={() => setTab("ventas")} className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${tab === "ventas" ? "bg-[var(--bg-card)] text-[var(--brand-primary)] border-b-2 border-[var(--brand-primary)]" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"}`}>
-                    Ventas
-                </button>
-                <button onClick={() => setTab("flujos")} className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${tab === "flujos" ? "bg-[var(--bg-card)] text-[var(--brand-primary)] border-b-2 border-[var(--brand-primary)]" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"}`}>
-                    Flujos de Piso
-                </button>
-            </div>
-
-            {tab === "ventas" ? (
-                <>
-                    {/* Detalle table */}
-                    <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-5">
-                        <div className="mb-4 flex items-center justify-between">
-                            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Detalle VINs Vendidos</h3>
-                            <span className="text-xs text-[var(--text-muted)]">{fmtNumber(detalle.length)} registros</span>
-                        </div>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead>
-                                    <tr className="border-b border-[var(--border-color)] text-left text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">
-                                        <th className="pb-2 pr-4">Fecha</th>
-                                        <th className="pb-2 pr-4">Sucursal</th>
-                                        <th className="pb-2 pr-4">Modelo</th>
-                                        <th className="pb-2 pr-4">VIN</th>
-                                        <th className="pb-2">Tipo</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {pagedDetalle.map((d, i) => (
-                                        <tr key={`${d.vin}-${i}`} className="border-b border-[var(--border-color)]/50 transition-colors hover:bg-[var(--bg-card-hover)]">
-                                            <td className="py-2.5 pr-4 text-[var(--text-secondary)]">{fmtDate(d.fecha)}</td>
-                                            <td className="py-2.5 pr-4 text-[var(--text-primary)]">{d.sucursal}</td>
-                                            <td className="py-2.5 pr-4 text-[var(--text-primary)]">{d.modelo}</td>
-                                            <td className="py-2.5 pr-4 font-mono text-xs text-[var(--text-secondary)]">{d.vin}</td>
-                                            <td className="py-2.5">
-                                                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${d.venta_contado ? "bg-[var(--success)]/10 text-[var(--success)]" : "bg-[var(--warning)]/10 text-[var(--warning)]"}`}>
-                                                    {d.venta_contado ? "Contado" : "Financiamiento"}
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                        {totalPages > 1 && (
-                            <div className="mt-4 flex items-center justify-center gap-2">
-                                <button disabled={page === 0} onClick={() => setPage(p => p - 1)} className="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs disabled:opacity-30">Anterior</button>
-                                <span className="text-xs text-[var(--text-muted)]">P\u00e1gina {page + 1} de {totalPages}</span>
-                                <button disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)} className="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs disabled:opacity-30">Siguiente</button>
-                            </div>
-                        )}
+            {/* Ranking de Asesores */}
+            <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-5">
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Ranking de Asesores</h3>
+                        <p className="mt-0.5 text-xs text-[var(--text-muted)]">Click en un asesor para ver su desglose por modelo &mdash; {mes}</p>
                     </div>
-                </>
-            ) : (
-                /* Flujos de Piso */
-                <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-5">
-                    <h3 className="mb-4 text-sm font-semibold text-[var(--text-primary)]">Flujos de Piso — FreshUp vs Internet</h3>
-                    <ResponsiveContainer width="100%" height={320}>
-                        <ComposedChart data={flujos}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
-                            <XAxis dataKey="fecha" tickFormatter={(v: string) => v.slice(8)} tick={{ fontSize: 11 }} stroke="var(--text-muted)" />
-                            <YAxis tick={{ fontSize: 11 }} stroke="var(--text-muted)" />
-                            <Tooltip contentStyle={{ backgroundColor: "var(--bg-card)", border: "1px solid var(--border-color)", borderRadius: 8 }} />
-                            <Legend />
-                            <Bar dataKey="freshup" name="FreshUp" fill="var(--brand-primary)" radius={[4, 4, 0, 0]} />
-                            <Bar dataKey="internet" name="Internet" fill="var(--brand-accent)" radius={[4, 4, 0, 0]} />
-                            <Line type="monotone" dataKey="total" name="Total" stroke="var(--text-primary)" strokeWidth={2} dot={false} />
-                        </ComposedChart>
-                    </ResponsiveContainer>
+                    {ranking && (
+                        <span className="rounded-full bg-[var(--brand-primary)]/10 px-3 py-1 text-xs font-semibold text-[var(--brand-primary)]">
+                            {ranking.asesores.length} asesores &middot; {fmtNumber(ranking.gran)} unidades
+                        </span>
+                    )}
                 </div>
-            )}
+
+                {!ranking || ranking.asesores.length === 0 ? (
+                    <p className="py-6 text-center text-xs text-[var(--text-muted)]">Sin ventas registradas para este periodo.</p>
+                ) : (
+                    <div className="overflow-hidden">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b border-[var(--border-color)] text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">
+                                    <th className="w-10 pb-2 pr-2 text-right">#</th>
+                                    <th className="pb-2 pr-4 text-left">Asesor</th>
+                                    <th className="pb-2 pr-4 text-left">Sucursal</th>
+                                    <th className="pb-2 pr-4 text-right">Unidades</th>
+                                    <th className="pb-2 pr-4 text-right">% Financ.</th>
+                                    <th className="pb-2 pr-2 text-right">% Total</th>
+                                    <th className="w-8 pb-2"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {ranking.asesores.map((a, idx) => {
+                                    const open = asesorAbierto === a.key;
+                                    const pctTotal = ranking.gran > 0 ? (a.total / ranking.gran) * 100 : 0;
+                                    return (
+                                        <Fragment key={a.key}>
+                                            <tr
+                                                onClick={() => setAsesorAbierto(open ? null : a.key)}
+                                                className={`cursor-pointer border-b border-[var(--border-color)]/50 transition-colors hover:bg-[var(--bg-card-hover)] ${open ? "bg-[var(--bg-card-hover)]" : ""}`}
+                                            >
+                                                <td className="py-2.5 pr-2 text-right text-xs text-[var(--text-muted)]">{idx + 1}</td>
+                                                <td className="py-2.5 pr-4 font-medium text-[var(--text-primary)]">{a.nombre}</td>
+                                                <td className="py-2.5 pr-4 text-xs text-[var(--text-secondary)]">{a.sucursal}</td>
+                                                <td className="py-2.5 pr-4 text-right font-bold text-[var(--text-primary)]">{a.total}</td>
+                                                <td className="py-2.5 pr-4 text-right text-[var(--text-secondary)]">
+                                                    <span className="font-medium">{a.pctFinan.toFixed(1)}%</span>
+                                                    <span className="ml-1 text-[10px] text-[var(--text-muted)]">({a.financiado}/{a.total})</span>
+                                                </td>
+                                                <td className="py-2.5 pr-2 text-right text-xs text-[var(--text-secondary)]">{pctTotal.toFixed(1)}%</td>
+                                                <td className="py-2.5 text-center text-xs text-[var(--text-muted)]" aria-hidden>{open ? "▴" : "▾"}</td>
+                                            </tr>
+                                            <AnimatePresence initial={false}>
+                                                {open && (
+                                                    <tr>
+                                                        <td colSpan={7} className="bg-[var(--bg-skeleton)]/30 p-0">
+                                                            <motion.div
+                                                                initial={{ opacity: 0, height: 0 }}
+                                                                animate={{ opacity: 1, height: "auto" }}
+                                                                exit={{ opacity: 0, height: 0 }}
+                                                                transition={{ duration: 0.18 }}
+                                                                className="overflow-hidden"
+                                                            >
+                                                                <div className="px-6 py-4">
+                                                                    <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                                                                        Desglose por modelo &mdash; {a.modelos.length} modelos
+                                                                    </p>
+                                                                    <div className="flex flex-col divide-y divide-[var(--border-color)]/40">
+                                                                        {a.modelos.map(m => {
+                                                                            const barPct = a.total > 0 ? (m.unidades / a.total) * 100 : 0;
+                                                                            return (
+                                                                                <div key={m.modelo} className="flex items-center gap-4 py-2">
+                                                                                    <div className="w-32 shrink-0 text-sm font-medium text-[var(--text-primary)]">{m.modelo}</div>
+                                                                                    <div className="flex-1">
+                                                                                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-skeleton)]">
+                                                                                            <div
+                                                                                                className="h-full bg-[var(--brand-primary)]"
+                                                                                                style={{ width: `${barPct}%` }}
+                                                                                            />
+                                                                                        </div>
+                                                                                    </div>
+                                                                                    <div className="w-16 shrink-0 text-right text-sm font-bold text-[var(--text-primary)]">{m.unidades}</div>
+                                                                                    <div className="w-28 shrink-0 text-right text-xs text-[var(--text-secondary)]">
+                                                                                        {m.pctFinan.toFixed(0)}% finan.
+                                                                                    </div>
+                                                                                </div>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            </motion.div>
+                                                        </td>
+                                                    </tr>
+                                                )}
+                                            </AnimatePresence>
+                                        </Fragment>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
         </motion.div>
     );
 }

@@ -63,7 +63,21 @@ def get_financials(db: Session, mui: int | None = None, anio_mes: str | None = N
                 COALESCE(SUM(p.monto) FILTER (WHERE p.seccion = 'INGRESOS'), 0)
                   - COALESCE(SUM(p.monto) FILTER (WHERE p.seccion = 'COSTOS'), 0)
                   - COALESCE(SUM(p.monto) FILTER (WHERE p.seccion = 'GASTOS'), 0)
-                  AS ppto_utilidad_operacion
+                  AS ppto_utilidad_operacion,
+                -- Ppto Ingresos de Servicio (postventa): ingresos / rama SERVICIO
+                COALESCE(SUM(p.monto) FILTER (
+                    WHERE p.seccion = 'INGRESOS'
+                      AND p.rama IN ('SERVICIO', 'BONIFICACION_SERVICIO')
+                ), 0) AS ppto_ingresos_servicio,
+                -- Ppto UB Postventa: ingresos servicio - costos servicio
+                COALESCE(SUM(p.monto) FILTER (
+                    WHERE p.seccion = 'INGRESOS'
+                      AND p.rama IN ('SERVICIO', 'BONIFICACION_SERVICIO')
+                ), 0)
+                - COALESCE(SUM(p.monto) FILTER (
+                    WHERE p.seccion = 'COSTOS'
+                      AND p.rama IN ('SERVICIO', 'BONIFICACION_SERVICIO')
+                ), 0) AS ppto_ub_postventa
             FROM dwh.fact_ppto_estado_resultados p
             WHERE p.fecha >= CAST(:mes_inicio AS date)
               AND p.fecha < CAST(:mes_fin AS date)
@@ -80,11 +94,14 @@ def get_financials(db: Session, mui: int | None = None, anio_mes: str | None = N
             r.gastos_variables,
             r.gastos_financieros,
             r.gastos_otros,
+            r.gastos_absorcion,
             CASE WHEN r.gastos_absorcion > 0
                  THEN ROUND((r.ub_postventa / r.gastos_absorcion) * 100, 2)
                  ELSE NULL END AS absorcion_pct,
             COALESCE(p.ppto_utilidad_bruta, 0) AS ppto_utilidad_bruta,
-            COALESCE(p.ppto_utilidad_operacion, 0) AS ppto_utilidad_operacion
+            COALESCE(p.ppto_utilidad_operacion, 0) AS ppto_utilidad_operacion,
+            COALESCE(p.ppto_ub_postventa, 0) AS ppto_ub_postventa,
+            COALESCE(p.ppto_ingresos_servicio, 0) AS ppto_ingresos_servicio
         FROM reales r
         JOIN dwh.dim_sucursales s ON r.mui = s.id_sucursal
         LEFT JOIN ppto p ON p.mui = r.mui

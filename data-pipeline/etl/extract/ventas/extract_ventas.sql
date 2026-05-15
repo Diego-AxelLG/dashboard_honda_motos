@@ -19,7 +19,10 @@ SELECT
         ELSE REGEXP_REPLACE(data_modelo, '\\b(moto |motocicleta |honda |2024 |2025 |2026 |)\\b', '')
     END AS modelo,
     data_vin AS vin,
-    CASE WHEN dats_compra = 'CONTADO' THEN 1 ELSE 0 END AS venta_contado
+    CASE WHEN dats_compra = 'CONTADO' THEN 1 ELSE 0 END AS venta_contado,
+    hus_IDhuser AS id_vendedor,
+    TRIM(CONCAT_WS(' ', hus_nombre, hus_apellido)) AS nombre_vendedor,
+    hus_status AS status_vendedor
 FROM hmcrm.vw_ventas_totales
 WHERE datco_snuevo = 'si'
   AND hus_ciudad IN ('Tijuana', 'Mexicali')

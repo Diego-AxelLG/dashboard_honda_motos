@@ -8,11 +8,12 @@ import {
 } from "recharts";
 import {
     getPostventaSummary, getOsAbiertas, getOsAbiertasDetalle,
-    getRefacciones, getUio, getPostventaOtsTendencia,
+    getRefacciones, getUio, getPostventaOtsTendencia, getFinancials,
+    getPostventaPlan, getPostventaOperacionPacing,
 } from "@/lib/api";
 import { AGENCIES } from "@/lib/constants";
 import { fmtCurrency, fmtNumber, fmtPct, fmtDate } from "@/lib/utils";
-import { KPICard, LoadingState, AgencyPills, MonthPicker } from "@/components/ui";
+import { KPICard, LoadingState, AgencyPills, MonthPicker, UltimaActualizacion } from "@/components/ui";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,6 +36,19 @@ interface OtsTendencia {
     totales: { ots_actual: number; ots_mes_anterior: number; ots_anio_anterior: number; var_mom_pct: number | null; var_yoy_pct: number | null } | null;
     cutoff_day: number;
     dias_mes: number;
+}
+interface EdrRow { mui: number; sucursal: string; seccion: string; rama: string; tipo: string; monto: number }
+interface FinancialsResponse { kpis: unknown[]; edr_reales: EdrRow[]; edr_presupuesto: unknown[] }
+interface PlanPostventaRow { mui: number; sucursal: string; mano_obra: number; refacciones_mostrador: number; refacciones_taller: number; ots: number }
+interface OperacionPacing {
+    anio_mes: string;
+    cutoff_day: number;
+    dias_mes: number;
+    actual: { ots: number; horas_x_os: number | null; ticket: number | null; mo_x_os: number | null } | null;
+    mes_ant: { ots: number; horas_x_os: number | null; ticket: number | null; mo_x_os: number | null } | null;
+    anio_ant: { ots: number; horas_x_os: number | null; ticket: number | null; mo_x_os: number | null } | null;
+    var_mom_pct: { ots: number | null; horas_x_os: number | null; ticket: number | null; mo_x_os: number | null } | null;
+    var_yoy_pct: { ots: number | null; horas_x_os: number | null; ticket: number | null; mo_x_os: number | null } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -63,6 +77,9 @@ export default function PostventaPage() {
     const [refacciones, setRefacciones] = useState<Refaccion[]>([]);
     const [uio, setUio] = useState<UioRow[]>([]);
     const [otsTend, setOtsTend] = useState<OtsTendencia | null>(null);
+    const [edrRows, setEdrRows] = useState<EdrRow[]>([]);
+    const [planPV, setPlanPV] = useState<PlanPostventaRow[]>([]);
+    const [opPacing, setOpPacing] = useState<OperacionPacing | null>(null);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -70,21 +87,27 @@ export default function PostventaPage() {
         const params = { anio_mes: mes, ...(mui ? { mui } : {}) };
         const muiOnly = mui ? { mui } : {};
         try {
-            const [pv, os, osDet, ref, u, ots] = await Promise.all([
+            const [pv, os, osDet, ref, u, ots, fin, plan, opp] = await Promise.all([
                 getPostventaSummary(params).catch(() => null),
                 getOsAbiertas(muiOnly).catch(() => null),
                 getOsAbiertasDetalle(muiOnly).catch(() => null),
                 getRefacciones(muiOnly).catch(() => null),
                 getUio(muiOnly).catch(() => null),
                 getPostventaOtsTendencia(params).catch(() => null),
+                getFinancials(params).catch(() => null) as Promise<FinancialsResponse | null>,
+                getPostventaPlan(params).catch(() => null),
+                getPostventaOperacionPacing(params).catch(() => null) as Promise<OperacionPacing | null>,
             ]);
-            if (!pv && !os && !osDet && !ref && !u && !ots) setFetchError(true);
+            if (!pv && !os && !osDet && !ref && !u && !ots && !fin) setFetchError(true);
             setSummary(pv ?? []);
             setOsAgregado(os?.agregado ?? []);
             setOsDetalle(osDet ?? []);
             setRefacciones(ref ?? []);
             setUio(u ?? []);
             setOtsTend(ots ?? null);
+            setEdrRows(fin?.edr_reales ?? []);
+            setPlanPV(plan ?? []);
+            setOpPacing(opp ?? null);
         } catch {
             setFetchError(true);
             setSummary([]);
@@ -93,6 +116,9 @@ export default function PostventaPage() {
             setRefacciones([]);
             setUio([]);
             setOtsTend(null);
+            setEdrRows([]);
+            setPlanPV([]);
+            setOpPacing(null);
         } finally {
             setLoading(false);
         }
@@ -111,6 +137,31 @@ export default function PostventaPage() {
     const ticketProm = totalOts > 0 ? totalVenta / totalOts : null;
     const ticketHrs = totalOts > 0 ? totalHoras / totalOts : null;
     const moXos = totalOts > 0 ? totalMO / totalOts : null;
+
+    // Ingresos servicio desde EdR (filtrado por mui en backend ya)
+    const ingresoTipo = (tipo: string) =>
+        edrRows
+            .filter(r => r.seccion === "INGRESOS" && r.rama === "SERVICIO" && r.tipo === tipo)
+            .reduce((s, r) => s + r.monto, 0);
+    const totalMostrador = ingresoTipo("MOSTRADOR");
+    const totalRefaccionesIng = ingresoTipo("REFACCIONES");
+
+    // Plan postventa agregado (suma de sucursales)
+    const filteredPlan = mui ? planPV.filter(p => p.mui === mui) : planPV;
+    const planMO = filteredPlan.reduce((s, p) => s + p.mano_obra, 0);
+    const planMostrador = filteredPlan.reduce((s, p) => s + p.refacciones_mostrador, 0);
+    const planRefacciones = filteredPlan.reduce((s, p) => s + p.refacciones_taller, 0);
+    const planOts = filteredPlan.reduce((s, p) => s + (p.ots ?? 0), 0);
+    const fmtPpto = (real: number, ppto: number): string | undefined => {
+        if (!ppto) return undefined;
+        const avance = (real / ppto) * 100;
+        return `ppto ${fmtCurrency(ppto)} · ${avance.toFixed(1)}%`;
+    };
+    const fmtPptoNum = (real: number, ppto: number): string | undefined => {
+        if (!ppto) return undefined;
+        const avance = (real / ppto) * 100;
+        return `ppto ${fmtNumber(ppto)} · ${avance.toFixed(1)}%`;
+    };
 
     // OS agrupadas por tipo
     const filteredOs = mui ? osAgregado.filter(o => o.mui === mui) : osAgregado;
@@ -154,9 +205,12 @@ export default function PostventaPage() {
                 <div>
                     <h1 className="text-lg font-bold text-[var(--text-primary)]">Postventa</h1>
                     <p className="mt-1 text-sm text-[var(--text-secondary)]">Servicio, OS abiertas, refacciones y UIO</p>
+                    <div className="mt-1">
+                        <UltimaActualizacion etls={["postventa_financiero", "os_abierta", "inv_refacciones", "uio"]} />
+                    </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                    <MonthPicker value={mes} onChange={setMes} min="2024-01" />
+                    <MonthPicker value={mes} onChange={setMes} min="2026-01" />
                     <AgencyPills options={AGENCIES} selected={mui} onChange={(v) => setMui(v as number | null)} />
                 </div>
             </div>
@@ -167,16 +221,54 @@ export default function PostventaPage() {
                 </div>
             )}
 
-            {/* KPI Row */}
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-8">
-                <KPICard title="Venta Total" value={totalVenta || null} format="currency" subtitle={cumplServicio != null ? `${fmtPct(cumplServicio)} vs plan` : undefined} />
-                <KPICard title="Venta MO" value={totalMO || null} format="currency" />
-                <KPICard title="OTs" value={totalOts || null} format="number" />
-                <KPICard title="Horas MO" value={totalHoras || null} format="number" />
-                <KPICard title="Ticket Prom $" value={ticketProm} format="currency" />
-                <KPICard title="Ticket Prom Hrs" value={ticketHrs} format="number" />
-                <KPICard title="MO x O/S" value={moXos} format="currency" />
-                <KPICard title="Plan Servicio" value={totalPlanServicio || null} format="currency" subtitle="presupuesto mes" />
+            {/* KPIs — Ingresos del Mes */}
+            <div>
+                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Ingresos del Mes</h2>
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+                    <KPICard title="Venta Total" value={totalVenta || null} format="currency" subtitle={cumplServicio != null ? `${fmtPct(cumplServicio)} vs plan` : undefined} />
+                    <KPICard title="Venta MO" value={totalMO || null} format="currency" subtitle={fmtPpto(totalMO, planMO)} />
+                    <KPICard title="Mostrador" value={totalMostrador || null} format="currency" subtitle={fmtPpto(totalMostrador, planMostrador)} />
+                    <KPICard title="Refacciones" value={totalRefaccionesIng || null} format="currency" subtitle={fmtPpto(totalRefaccionesIng, planRefacciones)} />
+                    <KPICard title="Plan Servicio" value={totalPlanServicio || null} format="currency" subtitle="presupuesto mes" />
+                </div>
+            </div>
+
+            {/* KPIs — Operación */}
+            <div>
+                <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Operaci&oacute;n</h2>
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <KPICard title="OTs" value={totalOts || null} format="number" subtitle={fmtPptoNum(totalOts, planOts)} />
+                    <KPICard
+                        title="Horas MO x O/S"
+                        value={ticketHrs}
+                        format="number"
+                        delta={opPacing?.var_mom_pct?.horas_x_os ?? null}
+                        deltaLabel="vs mes ant."
+                        subtitle={opPacing?.var_yoy_pct?.horas_x_os != null
+                            ? `YoY ${opPacing.var_yoy_pct.horas_x_os > 0 ? "+" : ""}${opPacing.var_yoy_pct.horas_x_os.toFixed(1)}%`
+                            : undefined}
+                    />
+                    <KPICard
+                        title="Ticket Prom $"
+                        value={ticketProm}
+                        format="currency"
+                        delta={opPacing?.var_mom_pct?.ticket ?? null}
+                        deltaLabel="vs mes ant."
+                        subtitle={opPacing?.var_yoy_pct?.ticket != null
+                            ? `YoY ${opPacing.var_yoy_pct.ticket > 0 ? "+" : ""}${opPacing.var_yoy_pct.ticket.toFixed(1)}%`
+                            : undefined}
+                    />
+                    <KPICard
+                        title="MO x O/S"
+                        value={moXos}
+                        format="currency"
+                        delta={opPacing?.var_mom_pct?.mo_x_os ?? null}
+                        deltaLabel="vs mes ant."
+                        subtitle={opPacing?.var_yoy_pct?.mo_x_os != null
+                            ? `YoY ${opPacing.var_yoy_pct.mo_x_os > 0 ? "+" : ""}${opPacing.var_yoy_pct.mo_x_os.toFixed(1)}%`
+                            : undefined}
+                    />
+                </div>
             </div>
 
             {/* OTs — tendencia diaria */}

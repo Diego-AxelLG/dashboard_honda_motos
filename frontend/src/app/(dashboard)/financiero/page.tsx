@@ -9,7 +9,7 @@ import {
 import { getFinancials } from "@/lib/api";
 import { AGENCIES } from "@/lib/constants";
 import { fmtCurrency } from "@/lib/utils";
-import { KPICard, LoadingState, AgencyPills, MonthPicker } from "@/components/ui";
+import { KPICard, LoadingState, AgencyPills, MonthPicker, UltimaActualizacion } from "@/components/ui";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -126,6 +126,9 @@ export default function FinancieroPage() {
                 <div>
                     <h1 className="text-lg font-bold text-[var(--text-primary)]">Financiero</h1>
                     <p className="mt-1 text-sm text-[var(--text-secondary)]">Gastos, rentabilidad y estado de resultados</p>
+                    <div className="mt-1">
+                        <UltimaActualizacion etls={["postventa_financiero"]} />
+                    </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                     <MonthPicker value={mes} onChange={setMes} min="2024-01" />

@@ -69,7 +69,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        if not path.startswith("/api/"):
+        if not path.startswith("/api/") or not _is_prod:
             return await call_next(request)
 
         ip = request.client.host if request.client else "unknown"

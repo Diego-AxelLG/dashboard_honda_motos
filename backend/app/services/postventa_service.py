@@ -311,3 +311,146 @@ def get_uio(db: Session, mui: int | None = None) -> list[dict]:
     if mui:
         params["mui"] = mui
     return [dict(r) for r in db.execute(sql, params).mappings().all()]
+
+
+def get_operacion_pacing(db: Session, mui: int | None = None, anio_mes: str | None = None) -> dict:
+    """KPIs de operacion postventa con comparativos MoM y YoY al mismo dia del mes.
+
+    KPIs: ots, horas_mo_x_os, ticket_prom, mo_x_os.
+
+    Retorna {
+        anio_mes, cutoff_day, dias_mes,
+        actual:   {ots, horas_mo, venta_total, venta_mo, horas_x_os, ticket, mo_x_os},
+        mes_ant:  {...},
+        anio_ant: {...},
+        var_mom_pct: {ots, horas_x_os, ticket, mo_x_os},
+        var_yoy_pct: {ots, horas_x_os, ticket, mo_x_os}
+    }
+    """
+    today = date.today()
+    if anio_mes is None:
+        anio_mes = today.strftime("%Y-%m")
+    year, month = int(anio_mes[:4]), int(anio_mes[5:7])
+    dias_mes = monthrange(year, month)[1]
+    if (year, month) == (today.year, today.month):
+        cutoff_day = min(today.day, dias_mes)
+    elif (year, month) > (today.year, today.month):
+        cutoff_day = 0
+    else:
+        cutoff_day = dias_mes
+
+    if cutoff_day == 0:
+        return {
+            "anio_mes": anio_mes, "cutoff_day": 0, "dias_mes": dias_mes,
+            "actual": None, "mes_ant": None, "anio_ant": None,
+            "var_mom_pct": None, "var_yoy_pct": None,
+        }
+
+    mes_inicio, _, _ = _resolve_month(anio_mes)
+    mui_v = "AND k.mui = CAST(:mui AS int)" if mui else ""
+
+    # SUM hasta el dia=cutoff_day (inclusive) en cada periodo
+    sql = text(f"""
+        WITH base AS (
+            SELECT 'actual' AS label, k.cantidad, k.horas_mo, k.venta_mo, k.venta_total_sin_iva AS venta_total
+            FROM dwh.fact_postventa_kpis k
+            WHERE k.fecha >= CAST(:mes_inicio AS date)
+              AND k.fecha <  CAST(:mes_inicio AS date) + (CAST(:cutoff_day AS int) || ' days')::interval
+              {mui_v}
+            UNION ALL
+            SELECT 'mes_ant', k.cantidad, k.horas_mo, k.venta_mo, k.venta_total_sin_iva
+            FROM dwh.fact_postventa_kpis k
+            WHERE k.fecha >= (CAST(:mes_inicio AS date) - INTERVAL '1 month')::date
+              AND k.fecha <  (CAST(:mes_inicio AS date) - INTERVAL '1 month')::date + (CAST(:cutoff_day AS int) || ' days')::interval
+              {mui_v}
+            UNION ALL
+            SELECT 'anio_ant', k.cantidad, k.horas_mo, k.venta_mo, k.venta_total_sin_iva
+            FROM dwh.fact_postventa_kpis k
+            WHERE k.fecha >= (CAST(:mes_inicio AS date) - INTERVAL '1 year')::date
+              AND k.fecha <  (CAST(:mes_inicio AS date) - INTERVAL '1 year')::date + (CAST(:cutoff_day AS int) || ' days')::interval
+              {mui_v}
+        )
+        SELECT label,
+               COALESCE(SUM(cantidad), 0)::int  AS ots,
+               COALESCE(SUM(horas_mo), 0)::numeric(14,2) AS horas_mo,
+               COALESCE(SUM(venta_mo), 0)::numeric(14,2) AS venta_mo,
+               COALESCE(SUM(venta_total), 0)::numeric(14,2) AS venta_total
+        FROM base
+        GROUP BY label
+    """)
+    params: dict = {"mes_inicio": mes_inicio, "cutoff_day": cutoff_day}
+    if mui:
+        params["mui"] = mui
+
+    rows = {r["label"]: dict(r) for r in db.execute(sql, params).mappings().all()}
+
+    def block(label: str) -> dict:
+        r = rows.get(label, {"ots": 0, "horas_mo": 0, "venta_mo": 0, "venta_total": 0})
+        ots = int(r["ots"] or 0)
+        horas = float(r["horas_mo"] or 0)
+        vmo = float(r["venta_mo"] or 0)
+        vtot = float(r["venta_total"] or 0)
+        return {
+            "ots": ots,
+            "horas_mo": round(horas, 1),
+            "venta_mo": round(vmo, 2),
+            "venta_total": round(vtot, 2),
+            "horas_x_os": round(horas / ots, 2) if ots else None,
+            "ticket": round(vtot / ots, 2) if ots else None,
+            "mo_x_os": round(vmo / ots, 2) if ots else None,
+        }
+
+    actual = block("actual")
+    mes_ant = block("mes_ant")
+    anio_ant = block("anio_ant")
+
+    def pct(curr, base):
+        if curr is None or base is None or base == 0:
+            return None
+        return round((curr / base - 1) * 100, 1)
+
+    return {
+        "anio_mes": anio_mes,
+        "cutoff_day": cutoff_day,
+        "dias_mes": dias_mes,
+        "actual": actual,
+        "mes_ant": mes_ant,
+        "anio_ant": anio_ant,
+        "var_mom_pct": {
+            "ots":        pct(actual["ots"],         mes_ant["ots"]),
+            "horas_x_os": pct(actual["horas_x_os"],  mes_ant["horas_x_os"]),
+            "ticket":     pct(actual["ticket"],      mes_ant["ticket"]),
+            "mo_x_os":    pct(actual["mo_x_os"],     mes_ant["mo_x_os"]),
+        },
+        "var_yoy_pct": {
+            "ots":        pct(actual["ots"],         anio_ant["ots"]),
+            "horas_x_os": pct(actual["horas_x_os"],  anio_ant["horas_x_os"]),
+            "ticket":     pct(actual["ticket"],      anio_ant["ticket"]),
+            "mo_x_os":    pct(actual["mo_x_os"],     anio_ant["mo_x_os"]),
+        },
+    }
+
+
+def get_plan(db: Session, mui: int | None = None, anio_mes: str | None = None) -> list[dict]:
+    """Plan postventa del mes pivoteado por sucursal: mano_obra, refacciones_mostrador, refacciones_taller."""
+    mes_inicio, mes_fin, _ = _resolve_month(anio_mes)
+    mui_clause = "AND p.id_sucursal = CAST(:mui AS int)" if mui else ""
+    sql = text(f"""
+        SELECT p.id_sucursal AS mui,
+               s.nombre AS sucursal,
+               COALESCE(SUM(p.monto) FILTER (WHERE p.tipo = 'mano_obra'), 0)             AS mano_obra,
+               COALESCE(SUM(p.monto) FILTER (WHERE p.tipo = 'refacciones_mostrador'), 0) AS refacciones_mostrador,
+               COALESCE(SUM(p.monto) FILTER (WHERE p.tipo = 'refacciones_taller'), 0)    AS refacciones_taller,
+               COALESCE(SUM(p.monto) FILTER (WHERE p.tipo = 'ots'), 0)::int              AS ots
+        FROM dwh.fact_plan_postventa p
+        JOIN dwh.dim_sucursales s ON p.id_sucursal = s.id_sucursal
+        WHERE p.anio_mes >= CAST(:mes_inicio AS date)
+          AND p.anio_mes < CAST(:mes_fin AS date)
+          {mui_clause}
+        GROUP BY p.id_sucursal, s.nombre
+        ORDER BY p.id_sucursal
+    """)
+    params: dict = {"mes_inicio": mes_inicio, "mes_fin": mes_fin}
+    if mui:
+        params["mui"] = mui
+    return [dict(r) for r in db.execute(sql, params).mappings().all()]

@@ -24,8 +24,7 @@ WHERE
     cb.marca = 'HONDA MOTOS'
     AND b.terminacion IN (4, 6)
     AND cb.seccion IN ('INGRESOS', 'COSTOS', 'GASTOS')
-    AND CAST(CONCAT_WS('-', b.anio_ejercicio, b.mesi, '01') AS DATE)
-        >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 6 MONTH), '%Y-%m-01')
+    AND b.anio_ejercicio >= 2024
 GROUP BY b.anio_ejercicio, b.mesi, b.terminacion, cb.seccion, cb.rama, cb.tipo
 HAVING SUM(b.abono - b.cargo) != 0
 ORDER BY Mui, Fecha, Seccion, Rama, Tipo;

@@ -8,6 +8,7 @@ from backend.app.api.endpoints.postventa import router as postventa_router
 from backend.app.api.endpoints.financiero import router as financiero_router
 from backend.app.api.endpoints.inventario import router as inventario_router
 from backend.app.api.endpoints.cinco_alas import router as cinco_alas_router
+from backend.app.api.endpoints.cobranza import router as cobranza_router
 
 api_router = APIRouter()
 
@@ -19,3 +20,4 @@ api_router.include_router(postventa_router, prefix="/postventa", tags=["Postvent
 api_router.include_router(financiero_router, prefix="/financiero", tags=["Financiero"])
 api_router.include_router(inventario_router, prefix="/inventario", tags=["Inventario"])
 api_router.include_router(cinco_alas_router, prefix="/cinco-alas", tags=["Cinco Alas"])
+api_router.include_router(cobranza_router, prefix="/cobranza", tags=["Cobranza"])

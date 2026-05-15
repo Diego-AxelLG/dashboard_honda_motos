@@ -34,3 +34,8 @@ def ventas_cumplimiento_pacing(mui: int | None = None, anio_mes: str | None = No
 @router.get("/detalle")
 def ventas_detalle(mui: int | None = None, anio_mes: str | None = None, db: Session = Depends(get_db)):
     return ventas_service.get_detalle(db, mui, anio_mes)
+
+
+@router.get("/por-asesor-modelo")
+def ventas_por_asesor_modelo(mui: int | None = None, anio_mes: str | None = None, db: Session = Depends(get_db)):
+    return ventas_service.get_por_asesor_modelo(db, mui, anio_mes)

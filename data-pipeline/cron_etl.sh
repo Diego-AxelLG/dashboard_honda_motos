@@ -64,7 +64,7 @@ run_refresh() {
 run_main() {
     log "=== INICIO main ==="
     run_etl "Ventas"       "data-pipeline/etl/scripts/etl_ventas.py"
-    run_etl "Plan Ventas"  "data-pipeline/etl/scripts/etl_plan_ventas.py"
+    run_etl "Plan CSV"     "data-pipeline/etl/scripts/etl_plan_csv.py"
     run_etl "Flujos Piso"  "data-pipeline/etl/scripts/etl_flujos_piso.py"
     run_etl "Inventario"   "data-pipeline/etl/scripts/etl_inventario.py"
     run_refresh
@@ -74,7 +74,9 @@ run_main() {
 run_secondary() {
     log "=== INICIO secondary ==="
     run_etl "Postventa+Financiero" "data-pipeline/etl/scripts/etl_postventa_financiero.py"
+    run_etl "Ppto Derivado"        "data-pipeline/etl/scripts/etl_ppto_derivado.py"
     run_etl "OS Abierta"           "data-pipeline/etl/scripts/etl_os_abierta.py"
+    run_etl "Cobranza"             "data-pipeline/etl/scripts/etl_cobranza.py"
     run_etl "Inv Refacciones"      "data-pipeline/etl/scripts/etl_inv_refacciones.py"
     run_etl "UIO"                  "data-pipeline/etl/scripts/etl_uio.py"
     run_refresh

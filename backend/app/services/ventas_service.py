@@ -316,14 +316,43 @@ def get_detalle(db: Session, mui: int | None = None, anio_mes: str | None = None
     sql = text(f"""
         SELECT CAST(fv.fecha AS text) AS fecha, fv.id_sucursal,
                s.nombre AS sucursal, fv.modelo, fv.id_oportunidad AS vin,
-               fv.venta_contado
+               fv.venta_contado, v.nombre AS asesor
         FROM dwh.fact_ventas fv
         JOIN dwh.dim_sucursales s ON fv.id_sucursal = s.id_sucursal
+        LEFT JOIN dwh.dim_vendedores v ON fv.id_vendedor = v.id_vendedor
         WHERE fv.fecha >= CAST(:mes_inicio AS date)
           AND fv.fecha < CAST(:mes_fin AS date)
           {mui_clause}
         ORDER BY fv.fecha DESC
         LIMIT 500
+    """)
+    params: dict = {"mes_inicio": mes_inicio, "mes_fin": mes_fin}
+    if mui: params["mui"] = mui
+    return [dict(r) for r in db.execute(sql, params).mappings().all()]
+
+
+def get_por_asesor_modelo(db: Session, mui: int | None = None, anio_mes: str | None = None) -> list[dict]:
+    """Agregado de unidades por asesor x modelo en el mes."""
+    mes_inicio, mes_fin = _resolve_month(anio_mes)
+    mui_clause = _mui_filter("fv", mui)
+
+    sql = text(f"""
+        SELECT COALESCE(fv.id_vendedor, 0) AS id_vendedor,
+               COALESCE(v.nombre, 'Sin asignar') AS asesor,
+               fv.id_sucursal,
+               s.nombre AS sucursal,
+               fv.modelo,
+               COUNT(*) AS unidades,
+               SUM(CASE WHEN fv.venta_contado THEN 1 ELSE 0 END)::int AS contado,
+               SUM(CASE WHEN fv.venta_contado THEN 0 ELSE 1 END)::int AS financiado
+        FROM dwh.fact_ventas fv
+        JOIN dwh.dim_sucursales s ON fv.id_sucursal = s.id_sucursal
+        LEFT JOIN dwh.dim_vendedores v ON fv.id_vendedor = v.id_vendedor
+        WHERE fv.fecha >= CAST(:mes_inicio AS date)
+          AND fv.fecha < CAST(:mes_fin AS date)
+          {mui_clause}
+        GROUP BY fv.id_vendedor, v.nombre, fv.id_sucursal, s.nombre, fv.modelo
+        ORDER BY asesor, modelo
     """)
     params: dict = {"mes_inicio": mes_inicio, "mes_fin": mes_fin}
     if mui: params["mui"] = mui

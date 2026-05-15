@@ -19,8 +19,7 @@ WHERE
     marca = 'HONDA MOTOS'
     AND terminacion IN (1, 2)
     AND seccion NOT IN ('', '-')
-    AND DATE_FORMAT(CONCAT_WS('-', anio_ejercicio, mes, '01'), '%Y-%m-01')
-        >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 6 MONTH), '%Y-%m-01')
+    AND anio_ejercicio >= 2024
 GROUP BY anio_ejercicio, mes, terminacion, seccion, rama, tipo
 HAVING SUM(mensual) != 0
 ORDER BY Mui, Fecha, Seccion, Rama, Tipo;

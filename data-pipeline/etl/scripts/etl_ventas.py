@@ -86,6 +86,63 @@ def upsert_ventas(table, conn, keys, data_iter):
     conn.execute(stmt)
 
 
+def upsert_vendedores(table, conn, keys, data_iter):
+    """UPSERT via ON CONFLICT (id_vendedor) DO UPDATE."""
+    data = [dict(zip(keys, row)) for row in data_iter]
+    if not data:
+        return
+
+    stmt = pg_insert(table.table).values(data)
+    update_dict = {
+        key: getattr(stmt.excluded, key)
+        for key in keys
+        if key != "id_vendedor"
+    }
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["id_vendedor"],
+        set_=update_dict,
+    )
+    conn.execute(stmt)
+
+
+def cargar_dim_vendedores(df: pd.DataFrame, pg_engine) -> int:
+    """Deriva dim_vendedores del extract y hace UPSERT por id_vendedor.
+
+    Para cada asesor toma la sucursal de su venta mas reciente y `activo`=True
+    cuando su `status_vendedor` mas reciente es 'Empleado'.
+    """
+    base = df.dropna(subset=["id_vendedor"]).copy()
+    if base.empty:
+        logger.warning("   [VENDEDORES] Sin asesores en el extract; omitido")
+        return 0
+
+    base["id_vendedor"] = base["id_vendedor"].astype(int)
+    base["nombre_vendedor"] = base["nombre_vendedor"].fillna("").str.strip()
+    base = base[base["nombre_vendedor"] != ""]
+
+    # Para cada asesor, quedarnos con su registro mas reciente
+    base.sort_values("fecha", ascending=False, inplace=True)
+    latest = base.drop_duplicates(subset=["id_vendedor"], keep="first")
+
+    dim = pd.DataFrame({
+        "id_vendedor": latest["id_vendedor"].astype(int),
+        "nombre":      latest["nombre_vendedor"].astype(str),
+        "id_sucursal": latest["mui"].astype(int),
+        "activo":      latest["status_vendedor"].fillna("").str.strip().str.lower().eq("empleado"),
+    })
+
+    dim.to_sql(
+        "dim_vendedores",
+        pg_engine,
+        schema="dwh",
+        if_exists="append",
+        index=False,
+        method=upsert_vendedores,
+    )
+    logger.info(f"   {len(dim):,} vendedores cargados (UPSERT) en dwh.dim_vendedores")
+    return len(dim)
+
+
 # ---------------------------------------------------------------------------
 # PIPELINE VENTAS
 # ---------------------------------------------------------------------------
@@ -117,15 +174,20 @@ def cargar_ventas(hmcrm_engine, pg_engine, fecha_inicio: str) -> int:
     # Crear id_oportunidad = VIN
     df["id_oportunidad"] = df["vin"]
 
+    # Cargar dim_vendedores antes que el fact (FK)
+    cargar_dim_vendedores(df, pg_engine)
+
     # Mapear columnas al schema destino
     df["id_sucursal"] = df["mui"].astype(int)
     df["es_nuevo"] = True
     df["monto"] = 0  # No disponible en esta fuente
     df["venta_contado"] = df["venta_contado"].astype(bool)
     df["modelo"] = df["modelo"].str.strip()
+    df["id_vendedor"] = df["id_vendedor"].astype("Int64")  # nullable int
 
     # Seleccionar columnas destino
-    cols = ["id_oportunidad", "fecha", "id_sucursal", "monto", "es_nuevo", "modelo", "venta_contado"]
+    cols = ["id_oportunidad", "fecha", "id_sucursal", "id_vendedor",
+            "monto", "es_nuevo", "modelo", "venta_contado"]
     df_out = df[cols].copy()
 
     # -- LOAD (UPSERT) --

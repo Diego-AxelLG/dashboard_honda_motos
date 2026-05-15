@@ -44,11 +44,11 @@ def get_resumen_stock(db: Session, mui: int | None = None) -> dict:
             SELECT MAX(fecha_snapshot) AS d FROM dwh.fact_inventario
         ),
         ventas_avg AS (
-            -- promedio de ventas mensuales por (sucursal, modelo) ultimos 6 meses
+            -- promedio mensual de ventas por (sucursal, modelo) ultimos 3 meses
             SELECT fv.id_sucursal, fv.modelo,
-                   COUNT(*)::numeric / 6.0 AS avg_mensual
+                   ROUND(COUNT(*)::numeric / 3.0, 2) AS vta_3m
             FROM dwh.fact_ventas fv
-            WHERE fv.fecha >= (CURRENT_DATE - INTERVAL '6 months')
+            WHERE fv.fecha >= (CURRENT_DATE - INTERVAL '3 months')
               AND fv.fecha <  CURRENT_DATE
               {mui_clause_fv}
             GROUP BY fv.id_sucursal, fv.modelo
@@ -62,10 +62,10 @@ def get_resumen_stock(db: Session, mui: int | None = None) -> dict:
                COUNT(*)::int AS total,
                SUM(CASE WHEN fi.dias_inventario > 90 THEN 1 ELSE 0 END)::int AS n_90_plus,
                ROUND(AVG(fi.dias_inventario), 1) AS edad_promedio,
-               va.avg_mensual,
+               va.vta_3m,
                CASE
-                   WHEN va.avg_mensual IS NULL OR va.avg_mensual = 0 THEN NULL
-                   ELSE ROUND(COUNT(*)::numeric / va.avg_mensual, 1)
+                   WHEN va.vta_3m IS NULL OR va.vta_3m = 0 THEN NULL
+                   ELSE ROUND(COUNT(*)::numeric / va.vta_3m, 1)
                END AS meses_inventario
         FROM dwh.fact_inventario fi
         JOIN dwh.dim_sucursales s ON fi.id_sucursal = s.id_sucursal
@@ -73,7 +73,7 @@ def get_resumen_stock(db: Session, mui: int | None = None) -> dict:
         LEFT JOIN ventas_avg va   ON va.id_sucursal = fi.id_sucursal
                                  AND va.modelo      = fi.modelo
         WHERE 1=1 {mui_clause_fi}
-        GROUP BY fi.id_sucursal, s.nombre, fi.modelo, va.avg_mensual
+        GROUP BY fi.id_sucursal, s.nombre, fi.modelo, va.vta_3m
         ORDER BY fi.id_sucursal, total DESC, fi.modelo
     """)
     snap_sql = text("SELECT CAST(MAX(fecha_snapshot) AS text) AS d FROM dwh.fact_inventario")
@@ -100,7 +100,7 @@ def get_resumen_stock(db: Session, mui: int | None = None) -> dict:
                 "unidades_90_plus": 0,
                 "edad_promedio": 0.0,
                 "_edad_sum": 0.0,
-                "_sum_avg_mensual": 0.0,
+                "_sum_vta_3m": 0.0,
                 "modelos": [],
             }
         s = suc_map[m]
@@ -110,14 +110,15 @@ def get_resumen_stock(db: Session, mui: int | None = None) -> dict:
         s["facturado"] += r["facturado"]
         s["unidades_90_plus"] += r["n_90_plus"]
         s["_edad_sum"] += float(r["edad_promedio"] or 0) * r["total"]
-        if r["avg_mensual"] is not None:
-            s["_sum_avg_mensual"] += float(r["avg_mensual"])
+        if r["vta_3m"] is not None:
+            s["_sum_vta_3m"] += float(r["vta_3m"])
         s["modelos"].append({
             "modelo": r["modelo"],
             "disponible": r["disponible"],
             "apartado": r["apartado"],
             "facturado": r["facturado"],
             "total": r["total"],
+            "vta_3m": float(r["vta_3m"]) if r["vta_3m"] is not None else None,
             "meses_inventario": float(r["meses_inventario"]) if r["meses_inventario"] is not None else None,
         })
 
@@ -126,9 +127,10 @@ def get_resumen_stock(db: Session, mui: int | None = None) -> dict:
         total = s["total_stock"]
         s["edad_promedio"] = round(s.pop("_edad_sum") / total, 1) if total else 0
         s["pct_90_plus"] = round((s["unidades_90_plus"] / total) * 100, 1) if total else 0.0
-        avg_mes = s.pop("_sum_avg_mensual")
-        s["meses_inventario_total"] = round(total / avg_mes, 1) if avg_mes > 0 and total else None
-        s["_avg_mensual_total"] = avg_mes  # se usa abajo para el agregado
+        vta_3m = s.pop("_sum_vta_3m")
+        s["vta_3m_total"] = round(vta_3m, 2) if vta_3m > 0 else None
+        s["meses_inventario_total"] = round(total / vta_3m, 1) if vta_3m > 0 and total else None
+        s["_vta_3m_total"] = vta_3m  # se usa abajo para el agregado
         sucursales.append(s)
     sucursales.sort(key=lambda x: x["mui"])
 
@@ -147,8 +149,9 @@ def get_resumen_stock(db: Session, mui: int | None = None) -> dict:
     total_agg["edad_promedio"] = round(
         sum(s["edad_promedio"] * s["total_stock"] for s in sucursales) / tot, 1
     ) if tot else 0.0
-    avg_mes_total = sum(s.pop("_avg_mensual_total") for s in sucursales)
-    total_agg["meses_inventario_total"] = round(tot / avg_mes_total, 1) if avg_mes_total > 0 and tot else None
+    vta_3m_total = sum(s.pop("_vta_3m_total") for s in sucursales)
+    total_agg["vta_3m_total"] = round(vta_3m_total, 2) if vta_3m_total > 0 else None
+    total_agg["meses_inventario_total"] = round(tot / vta_3m_total, 1) if vta_3m_total > 0 and tot else None
 
     # Modelos agregados cross-sucursal
     modelo_agg: dict[str, dict] = {}
@@ -156,22 +159,22 @@ def get_resumen_stock(db: Session, mui: int | None = None) -> dict:
         for mrow in s["modelos"]:
             mk = mrow["modelo"]
             if mk not in modelo_agg:
-                modelo_agg[mk] = {"modelo": mk, "disponible": 0, "apartado": 0, "facturado": 0, "total": 0, "_venta": 0.0, "_tiene_venta": False}
+                modelo_agg[mk] = {"modelo": mk, "disponible": 0, "apartado": 0, "facturado": 0, "total": 0, "_vta_3m": 0.0, "_tiene_venta": False}
             m = modelo_agg[mk]
             m["disponible"] += mrow["disponible"]
             m["apartado"] += mrow["apartado"]
             m["facturado"] += mrow["facturado"]
             m["total"] += mrow["total"]
-            if mrow["meses_inventario"] is not None and mrow["meses_inventario"] > 0:
-                m["_venta"] += mrow["total"] / mrow["meses_inventario"]
+            if mrow["vta_3m"] is not None:
+                m["_vta_3m"] += mrow["vta_3m"]
                 m["_tiene_venta"] = True
 
     total_agg["modelos"] = []
     for m in sorted(modelo_agg.values(), key=lambda x: -x["total"]):
-        venta = m.pop("_venta")
+        vta = m.pop("_vta_3m")
         tiene = m.pop("_tiene_venta")
-        meses = round(m["total"] / venta, 1) if tiene and venta > 0 else None
-        m["meses_inventario"] = meses
+        m["vta_3m"] = round(vta, 2) if tiene else None
+        m["meses_inventario"] = round(m["total"] / vta, 1) if tiene and vta > 0 else None
         total_agg["modelos"].append(m)
 
     return {

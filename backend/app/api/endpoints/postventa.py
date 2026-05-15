@@ -39,3 +39,13 @@ def refacciones(mui: int | None = None, db: Session = Depends(get_db)):
 @router.get("/uio")
 def uio(mui: int | None = None, db: Session = Depends(get_db)):
     return postventa_service.get_uio(db, mui)
+
+
+@router.get("/plan")
+def plan(mui: int | None = None, anio_mes: str | None = None, db: Session = Depends(get_db)):
+    return postventa_service.get_plan(db, mui, anio_mes)
+
+
+@router.get("/operacion-pacing")
+def operacion_pacing(mui: int | None = None, anio_mes: str | None = None, db: Session = Depends(get_db)):
+    return postventa_service.get_operacion_pacing(db, mui, anio_mes)

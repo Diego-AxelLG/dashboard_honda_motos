@@ -5,13 +5,14 @@ import { motion } from "framer-motion";
 import {
     getVentasResumen,
     getVentasCumplimientoPacing,
+    getVentasDetalle,
     getFinancials,
     getPostventaSummary,
     getCincoAlasResumenActual,
 } from "@/lib/api";
 import { CLIENT_NAME, AGENCIES } from "@/lib/constants";
-import { fmtCurrency, fmtPct } from "@/lib/utils";
-import { LoadingState, AgencyPills, MonthPicker } from "@/components/ui";
+import { fmtCurrency, fmtNumber, fmtPct, fmtDate } from "@/lib/utils";
+import { LoadingState, AgencyPills, MonthPicker, UltimaActualizacion } from "@/components/ui";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,9 +35,15 @@ interface FinKPI {
     sucursal: string;
     utilidad_bruta: number;
     utilidad_operacion: number;
+    ub_postventa: number;
+    gastos_absorcion: number;
     absorcion_pct: number | null;
     ytd_ub: number;
     ytd_uo: number;
+    ppto_utilidad_bruta: number;
+    ppto_utilidad_operacion: number;
+    ppto_ub_postventa: number;
+    ppto_ingresos_servicio: number;
 }
 
 interface PacingRow {
@@ -69,6 +76,16 @@ interface PVSummary {
     venta_mo: number;
 }
 
+interface VentaDetalle {
+    fecha: string;
+    id_sucursal: number;
+    sucursal: string;
+    modelo: string;
+    vin: string;
+    venta_contado: boolean;
+    asesor: string | null;
+}
+
 interface CincoAlasArea { obtenido: number; maximo: number; penalizacion: number }
 interface CincoAlasResumen {
     existe: boolean;
@@ -95,8 +112,13 @@ interface SucursalVM {
     varVsAnio: number | null;
     utilidadBruta: number;
     utilidadOperacion: number;
+    utilidadServRef: number;
     absorcionPct: number | null;
     servicio: number;
+    pptoUtilidadBruta: number;
+    pptoUtilidadOperacion: number;
+    pptoUtilidadServRef: number;
+    pptoServicio: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,10 +165,29 @@ function ProgressBar({ pct, label }: { pct: number | null; label: string }) {
     );
 }
 
-function SucursalCard({ vm }: { vm: SucursalVM }) {
-    const absColor = (vm.absorcionPct ?? 0) >= 100 ? "text-[var(--success)]" : "text-[var(--danger)]";
+function PptoLine({ real, ppto }: { real: number; ppto: number }) {
+    if (!ppto) return null;
+    const avance = (real / ppto) * 100;
+    const color = avance >= 100 ? "text-[var(--success)]"
+        : avance >= 80 ? "text-[var(--warning)]"
+        : "text-[var(--danger)]";
     return (
-        <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] p-5 shadow-sm">
+        <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">
+            ppto {fmtCurrency(ppto)} <span className={`ml-0.5 font-semibold ${color}`}>&middot; {avance.toFixed(1)}%</span>
+        </p>
+    );
+}
+
+function SucursalCard({ vm, expanded, onToggle }: { vm: SucursalVM; expanded: boolean; onToggle: () => void }) {
+    const absColor = (vm.absorcionPct ?? 0) < 0 ? "text-[var(--danger)]" : "text-[var(--text-primary)]";
+    return (
+        <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={expanded}
+            className={`w-full text-left rounded-lg border bg-[var(--bg-card)] p-5 shadow-sm transition-colors cursor-pointer hover:bg-[var(--bg-card-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]/40 ${expanded ? "border-[var(--brand-primary)] ring-1 ring-[var(--brand-primary)]/40" : "border-[var(--border-color)]"}`}
+        >
+
             {/* Header */}
             <div className="flex items-start justify-between gap-3">
                 <p className="text-sm font-semibold text-[var(--text-primary)]">{vm.titulo}</p>
@@ -184,23 +225,38 @@ function SucursalCard({ vm }: { vm: SucursalVM }) {
                 <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
                     <div>
                         <span className="text-[var(--text-muted)]">Utilidad Bruta</span>
-                        <p className={`text-base font-semibold ${vm.utilidadBruta < 0 ? "text-[var(--danger)]" : "text-[var(--success)]"}`}>{fmtCurrency(vm.utilidadBruta)}</p>
+                        <p className={`text-base font-semibold ${vm.utilidadBruta < 0 ? "text-[var(--danger)]" : "text-[var(--text-primary)]"}`}>{fmtCurrency(vm.utilidadBruta)}</p>
+                        <PptoLine real={vm.utilidadBruta} ppto={vm.pptoUtilidadBruta} />
                     </div>
                     <div>
                         <span className="text-[var(--text-muted)]">Utilidad Operaci&oacute;n</span>
-                        <p className={`text-base font-semibold ${vm.utilidadOperacion < 0 ? "text-[var(--danger)]" : "text-[var(--success)]"}`}>{fmtCurrency(vm.utilidadOperacion)}</p>
+                        <p className={`text-base font-semibold ${vm.utilidadOperacion < 0 ? "text-[var(--danger)]" : "text-[var(--text-primary)]"}`}>{fmtCurrency(vm.utilidadOperacion)}</p>
                     </div>
                     <div>
-                        <span className="text-[var(--text-muted)]">Tasa Absorci&oacute;n</span>
-                        <p className={`text-base font-semibold ${absColor}`}>{vm.absorcionPct != null ? fmtPct(vm.absorcionPct) : "\u2014"}</p>
-                    </div>
-                    <div>
-                        <span className="text-[var(--text-muted)]">Servicio $</span>
+                        <span className="text-[var(--text-muted)]">Ingresos de Servicio</span>
                         <p className="text-base font-semibold text-[var(--text-primary)]">{fmtCurrency(vm.servicio)}</p>
+                        <PptoLine real={vm.servicio} ppto={vm.pptoServicio} />
                     </div>
+                    <div>
+                        <span className="text-[var(--text-muted)]">Util. Serv. y Refacc.</span>
+                        <p className={`text-base font-semibold ${vm.utilidadServRef < 0 ? "text-[var(--danger)]" : "text-[var(--text-primary)]"}`}>{fmtCurrency(vm.utilidadServRef)}</p>
+                        <PptoLine real={vm.utilidadServRef} ppto={vm.pptoUtilidadServRef} />
+                    </div>
+                    {vm.key !== "total" && (
+                        <div className="col-start-2">
+                            <span className="text-[var(--text-muted)]">Tasa Absorci&oacute;n</span>
+                            <p className={`text-base font-semibold ${absColor}`}>{vm.absorcionPct != null ? fmtPct(vm.absorcionPct) : "\u2014"}</p>
+                        </div>
+                    )}
                 </div>
             </div>
-        </div>
+
+            {/* Click affordance */}
+            <div className={`mt-4 flex items-center justify-end gap-1 border-t border-[var(--border-color)] pt-3 text-xs font-medium ${expanded ? "text-[var(--brand-primary)]" : "text-[var(--text-muted)]"}`}>
+                <span>{expanded ? "Ocultar detalle" : "Ver detalle de ventas"}</span>
+                <span aria-hidden>{expanded ? "\u25b4" : "\u25be"}</span>
+            </div>
+        </button>
     );
 }
 
@@ -287,20 +343,26 @@ export default function ResumenPage() {
     const [finKpis, setFinKpis] = useState<FinKPI[]>([]);
     const [pvSummary, setPvSummary] = useState<PVSummary[]>([]);
     const [cincoAlas, setCincoAlas] = useState<CincoAlasResumen | null>(null);
+    const [detalle, setDetalle] = useState<VentaDetalle[]>([]);
+    const [expandedKey, setExpandedKey] = useState<string | null>(null);
+    const [detallePage, setDetallePage] = useState(0);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
         setFetchError(false);
+        setExpandedKey(null);
+        setDetallePage(0);
         // Siempre pedir data consolidada (sin filtro mui) para poder construir
         // Total + Tijuana + Mexicali sin re-fetch al cambiar el AgencyPill.
         const params = { anio_mes: mes };
         try {
-            const [res, pac, fin, pv, ca] = await Promise.all([
+            const [res, pac, fin, pv, ca, det] = await Promise.all([
                 getVentasResumen(params).catch(() => null),
                 getVentasCumplimientoPacing(params).catch(() => null),
                 getFinancials(params).catch(() => null),
                 getPostventaSummary(params).catch(() => null),
                 getCincoAlasResumenActual().catch(() => null),
+                getVentasDetalle(params).catch(() => null),
             ]);
             if (!res && !fin && !pv && !pac) setFetchError(true);
             setResumen(res ?? []);
@@ -308,6 +370,7 @@ export default function ResumenPage() {
             setFinKpis(fin?.kpis ?? []);
             setPvSummary(pv ?? []);
             setCincoAlas(ca ?? null);
+            setDetalle(det ?? []);
         } catch {
             setFetchError(true);
             setResumen([]);
@@ -315,6 +378,7 @@ export default function ResumenPage() {
             setFinKpis([]);
             setPvSummary([]);
             setCincoAlas(null);
+            setDetalle([]);
         } finally {
             setLoading(false);
         }
@@ -347,14 +411,18 @@ export default function ResumenPage() {
 
         const utilidadBruta = finRows.reduce((s, f) => s + (f.utilidad_bruta ?? 0), 0);
         const utilidadOperacion = finRows.reduce((s, f) => s + (f.utilidad_operacion ?? 0), 0);
-        // Absorcion: promedio simple cuando hay mas de una sucursal (no es lineal pero
-        // alcanza para un resumen ejecutivo; el detalle fino vive en /financiero).
-        const absorcionValida = finRows.filter(f => f.absorcion_pct != null);
-        const absorcionPct = absorcionValida.length
-            ? absorcionValida.reduce((s, f) => s + (f.absorcion_pct ?? 0), 0) / absorcionValida.length
+        const ubPostventaSum = finRows.reduce((s, f) => s + (f.ub_postventa ?? 0), 0);
+        const gastosAbsorcionSum = finRows.reduce((s, f) => s + (f.gastos_absorcion ?? 0), 0);
+        const absorcionPct = gastosAbsorcionSum > 0
+            ? (ubPostventaSum / gastosAbsorcionSum) * 100
             : null;
 
         const servicio = pvRows.reduce((s, p) => s + p.venta_total, 0);
+
+        const pptoUtilidadBruta = finRows.reduce((s, f) => s + (f.ppto_utilidad_bruta ?? 0), 0);
+        const pptoUtilidadOperacion = finRows.reduce((s, f) => s + (f.ppto_utilidad_operacion ?? 0), 0);
+        const pptoUtilidadServRef = finRows.reduce((s, f) => s + (f.ppto_ub_postventa ?? 0), 0);
+        const pptoServicio = finRows.reduce((s, f) => s + (f.ppto_ingresos_servicio ?? 0), 0);
 
         return {
             key,
@@ -369,8 +437,13 @@ export default function ResumenPage() {
             varVsAnio: pacingRow?.var_vs_anio_anterior_pct ?? null,
             utilidadBruta,
             utilidadOperacion,
+            utilidadServRef: ubPostventaSum,
             absorcionPct,
             servicio,
+            pptoUtilidadBruta,
+            pptoUtilidadOperacion,
+            pptoUtilidadServRef,
+            pptoServicio,
         };
     }
 
@@ -381,6 +454,25 @@ export default function ResumenPage() {
     const visibleCards: SucursalVM[] = mui == null
         ? [totalVM, tjVM, mxVM]
         : mui === 6 ? [tjVM] : mui === 8 ? [mxVM] : [totalVM];
+
+    // ----- Detalle expandible -----
+    const expandedVM = expandedKey ? visibleCards.find(v => v.key === expandedKey) ?? null : null;
+    const detalleFiltrado = expandedVM == null
+        ? []
+        : expandedVM.mui == null
+            ? detalle
+            : detalle.filter(d => d.id_sucursal === expandedVM.mui);
+    const DETALLE_PAGE_SIZE = 50;
+    const detalleTotalPages = Math.ceil(detalleFiltrado.length / DETALLE_PAGE_SIZE);
+    const detallePaginado = detalleFiltrado.slice(
+        detallePage * DETALLE_PAGE_SIZE,
+        (detallePage + 1) * DETALLE_PAGE_SIZE,
+    );
+
+    const onToggleCard = (key: string) => {
+        setExpandedKey(prev => prev === key ? null : key);
+        setDetallePage(0);
+    };
 
     if (loading) {
         return (
@@ -397,9 +489,12 @@ export default function ResumenPage() {
                 <div>
                     <h1 className="text-lg font-bold text-[var(--text-primary)]">Resumen Ejecutivo</h1>
                     <p className="mt-1 text-sm text-[var(--text-secondary)]">Vista consolidada &mdash; {CLIENT_NAME}</p>
+                    <div className="mt-1">
+                        <UltimaActualizacion etls={["ventas", "plan_ventas", "postventa_financiero"]} />
+                    </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                    <MonthPicker value={mes} onChange={setMes} min="2024-01" />
+                    <MonthPicker value={mes} onChange={setMes} min="2026-01" />
                     <AgencyPills options={AGENCIES} selected={mui} onChange={(v) => setMui(v as number | null)} />
                 </div>
             </div>
@@ -412,15 +507,96 @@ export default function ResumenPage() {
 
             {/* Cards por sucursal */}
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
-                {visibleCards.map(vm => <SucursalCard key={vm.key} vm={vm} />)}
+                {visibleCards.map(vm => (
+                    <SucursalCard
+                        key={vm.key}
+                        vm={vm}
+                        expanded={expandedKey === vm.key}
+                        onToggle={() => onToggleCard(vm.key)}
+                    />
+                ))}
             </div>
+
+            {/* Panel detalle de ventas (expandible) */}
+            {expandedVM && (
+                <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    transition={{ duration: 0.2 }}
+                    className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] p-5"
+                >
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                                Detalle de Ventas &mdash; {expandedVM.titulo}
+                            </h3>
+                            <p className="mt-0.5 text-xs text-[var(--text-muted)]">VINs vendidos en {mes}</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <span className="text-xs text-[var(--text-muted)]">{fmtNumber(detalleFiltrado.length)} registros</span>
+                            <button
+                                type="button"
+                                onClick={() => setExpandedKey(null)}
+                                className="rounded-lg border border-[var(--border-color)] px-3 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-card-hover)]"
+                                aria-label="Cerrar detalle"
+                            >
+                                Cerrar
+                            </button>
+                        </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b border-[var(--border-color)] text-left text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">
+                                    <th className="pb-2 pr-4">Fecha</th>
+                                    <th className="pb-2 pr-4">Sucursal</th>
+                                    <th className="pb-2 pr-4">Modelo</th>
+                                    <th className="pb-2 pr-4">VIN</th>
+                                    <th className="pb-2 pr-4">Tipo</th>
+                                    <th className="pb-2">Asesor</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {detallePaginado.map((d, i) => (
+                                    <tr key={`${d.vin}-${i}`} className="border-b border-[var(--border-color)]/50 transition-colors hover:bg-[var(--bg-card-hover)]">
+                                        <td className="py-2.5 pr-4 text-[var(--text-secondary)]">{fmtDate(d.fecha)}</td>
+                                        <td className="py-2.5 pr-4 text-[var(--text-primary)]">{d.sucursal}</td>
+                                        <td className="py-2.5 pr-4 text-[var(--text-primary)]">{d.modelo}</td>
+                                        <td className="py-2.5 pr-4 font-mono text-xs text-[var(--text-secondary)]">{d.vin}</td>
+                                        <td className="py-2.5 pr-4">
+                                            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${d.venta_contado ? "bg-[var(--success)]/10 text-[var(--success)]" : "bg-[var(--warning)]/10 text-[var(--warning)]"}`}>
+                                                {d.venta_contado ? "Contado" : "Financiamiento"}
+                                            </span>
+                                        </td>
+                                        <td className="py-2.5 text-[var(--text-primary)]">{d.asesor ?? <span className="text-[var(--text-muted)]">&mdash;</span>}</td>
+                                    </tr>
+                                ))}
+                                {detalleFiltrado.length === 0 && (
+                                    <tr>
+                                        <td colSpan={6} className="py-6 text-center text-xs text-[var(--text-muted)]">
+                                            Sin ventas registradas para esta sucursal en {mes}.
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                    {detalleTotalPages > 1 && (
+                        <div className="mt-4 flex items-center justify-center gap-2">
+                            <button disabled={detallePage === 0} onClick={() => setDetallePage(p => p - 1)} className="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs disabled:opacity-30">Anterior</button>
+                            <span className="text-xs text-[var(--text-muted)]">P&aacute;gina {detallePage + 1} de {detalleTotalPages}</span>
+                            <button disabled={detallePage >= detalleTotalPages - 1} onClick={() => setDetallePage(p => p + 1)} className="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs disabled:opacity-30">Siguiente</button>
+                        </div>
+                    )}
+                </motion.div>
+            )}
 
             {/* Acumulado YTD */}
             {(ytdUb !== 0 || ytdUo !== 0) && (
                 <div className="flex flex-wrap gap-6 text-xs text-[var(--text-muted)]">
                     <span>Acumulado {new Date().getFullYear()} &mdash; <strong className="text-[var(--text-secondary)]">{ytdScope}</strong>:</span>
-                    <span><strong className={ytdUb < 0 ? "text-[var(--danger)]" : "text-[var(--success)]"}>UB {fmtCurrency(ytdUb)}</strong></span>
-                    <span><strong className={ytdUo < 0 ? "text-[var(--danger)]" : "text-[var(--success)]"}>UO {fmtCurrency(ytdUo)}</strong></span>
+                    <span><strong className={ytdUb < 0 ? "text-[var(--danger)]" : "text-[var(--text-primary)]"}>UB {fmtCurrency(ytdUb)}</strong></span>
+                    <span><strong className={ytdUo < 0 ? "text-[var(--danger)]" : "text-[var(--text-primary)]"}>UO {fmtCurrency(ytdUo)}</strong></span>
                 </div>
             )}
 

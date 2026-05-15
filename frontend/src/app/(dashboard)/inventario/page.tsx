@@ -6,7 +6,7 @@ import {
     getInventarioResumenStock, getInventarioDetalle, getInventarioApartados,
 } from "@/lib/api";
 import { fmtNumber } from "@/lib/utils";
-import { LoadingState } from "@/components/ui";
+import { LoadingState, UltimaActualizacion } from "@/components/ui";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -18,6 +18,7 @@ interface ModeloRow {
     apartado: number;
     facturado: number;
     total: number;
+    vta_3m: number | null;
     meses_inventario: number | null;
 }
 interface SucursalCard {
@@ -30,6 +31,7 @@ interface SucursalCard {
     unidades_90_plus: number;
     pct_90_plus: number;
     edad_promedio: number;
+    vta_3m_total: number | null;
     meses_inventario_total: number | null;
     modelos: ModeloRow[];
 }
@@ -187,6 +189,9 @@ export default function InventarioPage() {
                 <div>
                     <h1 className="text-lg font-bold text-[var(--text-primary)]">Inventario</h1>
                     <p className="mt-1 text-sm text-[var(--text-secondary)]">Stock actual por sucursal &mdash; click en una card para ver detalle</p>
+                    <div className="mt-1">
+                        <UltimaActualizacion etls={["inventario"]} />
+                    </div>
                 </div>
                 {resumen && (
                     <p className="text-xs text-[var(--text-muted)]">Snapshot: {resumen.fecha_snapshot}</p>
@@ -226,6 +231,7 @@ export default function InventarioPage() {
                                         <th className="pb-1.5 text-right text-[var(--warning)]">A</th>
                                         <th className="pb-1.5 text-right text-[var(--danger)]">F</th>
                                         <th className="pb-1.5 text-right">Uds</th>
+                                        <th className="pb-1.5 text-right" title="Promedio mensual de ventas, últimos 3 meses">VTA 3M</th>
                                         <th className="pb-1.5 text-right">Meses</th>
                                     </tr>
                                 </thead>
@@ -237,6 +243,9 @@ export default function InventarioPage() {
                                             <td className="py-1 text-right text-[var(--warning)]">{m.apartado || <span className="text-[var(--text-muted)]">—</span>}</td>
                                             <td className="py-1 text-right text-[var(--danger)]">{m.facturado || <span className="text-[var(--text-muted)]">—</span>}</td>
                                             <td className="py-1 text-right font-semibold text-[var(--text-primary)]">{m.total}</td>
+                                            <td className="py-1 text-right text-[var(--text-secondary)]">
+                                                {m.vta_3m == null ? <span className="text-[var(--text-muted)]">—</span> : m.vta_3m.toFixed(1)}
+                                            </td>
                                             <td className="py-1 text-right">
                                                 <span className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${mesesBadgeClass(m.meses_inventario)}`}>
                                                     {m.meses_inventario == null ? "—" : m.meses_inventario.toFixed(1)}
@@ -250,6 +259,9 @@ export default function InventarioPage() {
                                         <td className="pt-2 text-right font-bold text-[var(--warning)]">{c.apartado}</td>
                                         <td className="pt-2 text-right font-bold text-[var(--danger)]">{c.facturado}</td>
                                         <td className="pt-2 text-right font-bold text-[var(--text-primary)]">{c.total_stock}</td>
+                                        <td className="pt-2 text-right font-bold text-[var(--text-primary)]">
+                                            {c.vta_3m_total == null ? <span className="text-[var(--text-muted)]">—</span> : c.vta_3m_total.toFixed(1)}
+                                        </td>
                                         <td className="pt-2 text-right">
                                             <span className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${mesesBadgeClass(c.meses_inventario_total)}`}>
                                                 {c.meses_inventario_total == null ? "—" : c.meses_inventario_total.toFixed(1)}
